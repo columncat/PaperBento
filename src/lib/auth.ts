@@ -59,18 +59,26 @@ export async function logLogin(opts: {
 // ─────────────────────────────────────────────────────────────
 
 /*
- * 쿠키 이름은 **앱마다 다르다.**
+ * 쿠키 이름을 **세 앱이 함께 쓴다.** 일부러 그렇다.
  *
- * MailBento 와 MemoBento 는 둘 다 `mb_session` 을 쓴다. 하위 도메인으로 나눠
- * 두면 문제가 없지만, `BASE_PATH` 로 한 도메인에 `/mail`·`/memo`·`/paper` 를
- * 얹으면 쿠키는 경로를 구분하지 않으므로 **나중에 로그인한 앱이 앞 앱의 세션을
- * 덮어쓴다.** 논문함은 그 충돌에서 빠져 나온다.
+ * 한 도메인에 `/mail`·`/memo`·`/paper` 를 얹으면 쿠키는 경로를 가리지 않으므로
+ * 세 앱이 같은 쿠키를 본다. 설치 마법사가 셋에 **같은 `AUTH_SECRET`** 을 넣기
+ * 때문에(setup/server.js 의 `shared`) 그 쿠키는 어느 앱에서든 풀린다 —
+ * 한 번 로그인하면 셋 다 열린다.
+ *
+ * 이름을 달리하면 그 공유가 깨진다. 앱을 오갈 때마다 다시 로그인해야 하고,
+ * 세 앱이 한 벌처럼 보이는 것이 이 스택의 요점이라 그건 손해다.
+ *
+ * 대신 조건이 하나 붙는다 — **`AUTH_SECRET` 이 셋에서 같아야 한다.** 다르면
+ * 공유가 아니라 서로 쫓아내는 것이 된다: 남의 쿠키를 못 풀어 로그인 화면으로
+ * 보내고, 거기서 제 쿠키를 같은 이름으로 덮어써 앞 앱의 세션을 끊는다.
+ * 마법사를 거치지 않고 손으로 값을 넣을 때 특히 조심할 자리다.
  *
  * `middleware.ts` 도 같은 이름을 문자열로 들고 있다 — 거기는 Edge 런타임이라
  * 이 모듈(node crypto 를 쓴다)을 import 할 수 없다. 한쪽을 고치면 다른 쪽도.
  */
-export const SESSION_COOKIE_NAME = "pb_session";
-export const REMEMBER_COOKIE_NAME = "pb_remember";
+export const SESSION_COOKIE_NAME = "mb_session";
+export const REMEMBER_COOKIE_NAME = "mb_remember";
 
 const HOUR = 3600;
 const DAY = 24 * HOUR;

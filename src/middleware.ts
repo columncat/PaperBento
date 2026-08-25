@@ -59,7 +59,7 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isPublic(pathname)) return NextResponse.next();
 
-  const sessionToken = req.cookies.get("pb_session")?.value;
+  const sessionToken = req.cookies.get("mb_session")?.value;
   if (sessionToken) {
     const session = await verifySession(sessionToken);
     if (session) return NextResponse.next();
@@ -84,7 +84,7 @@ export async function middleware(req: NextRequest) {
   // 화면 이동이면 갱신을 거쳐 원래 자리로 돌려보낸다. API 는 그럴 수 없다 —
   // 리다이렉트를 따라간 fetch 는 갱신 라우트가 마지막에 내보내는 HTML 을
   // 받아 들고 JSON 인 줄 알고 읽는다. 401 을 주고 화면이 다시 부르게 한다.
-  const rememberToken = req.cookies.get("pb_remember")?.value;
+  const rememberToken = req.cookies.get("mb_remember")?.value;
   if (rememberToken) {
     const remember = await verifySession(rememberToken);
     if (remember) {
