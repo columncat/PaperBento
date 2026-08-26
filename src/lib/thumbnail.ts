@@ -1,4 +1,5 @@
 import { kindOf } from "./file-kind";
+import { loadPdfjs } from "./pdfjs";
 
 /**
  * 업로드 전에 **브라우저에서** 썸네일을 만든다.
@@ -30,16 +31,13 @@ async function imageThumb(file: File): Promise<string | null> {
 }
 
 async function pdfThumb(file: File): Promise<string | null> {
-  // pdfjs 는 무겁고 브라우저 전용이라 필요할 때만 동적으로 로드한다.
-  const pdfjs = await import("pdfjs-dist");
-  try {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.min.mjs",
-      import.meta.url,
-    ).toString();
-  } catch {
-    /* 워커 URL 해석 실패 시 pdfjs 기본값 사용 */
-  }
+  /*
+   * pdfjs 는 무겁고 브라우저 전용이라 필요할 때만 동적으로 로드한다.
+   * **여기서 직접 import 하지 않는다.** 워커 주소를 정하는 자리가 여기와
+   * 뷰어 두 곳이 되면 값이 갈리는 날 워커가 두 벌 뜬다. 문은 `lib/pdfjs.ts`
+   * 하나이고, 동적 로딩과 워커 설정은 그 안에 있다.
+   */
+  const pdfjs = await loadPdfjs();
 
   const buf = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;

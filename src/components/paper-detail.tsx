@@ -12,9 +12,10 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api } from "@/lib/client-api";
 import { startDownload } from "@/lib/download";
@@ -22,31 +23,77 @@ import {
   citationLine,
   fileUrl,
   formatBytes,
+  type Anchor,
   type GroupDTO,
+  type ItemColor,
+  type NoteDTO,
   type PaperDTO,
   type PaperMark,
   type ReadState,
   type SummaryDTO,
 } from "@/lib/types";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
+import { NoteEditor, type NoteEditorTarget } from "./note-editor";
+import { NoteList } from "./note-list";
 import { MarkPicker, ReadStateButton } from "./paper-mark";
 import { PaperSheet, type SheetTarget } from "./paper-sheet";
 import { PdfFrame } from "./pdf-frame";
+import type { PdfViewHandle } from "./pdf-view";
 import { RichText } from "./rich-text";
+import { SplitPane } from "./split-pane";
 
 /**
- * 논문 상세. **1단계에서는 읽는 것과 요약뿐이다.**
+ * 논문 상세. 원문과 글을 나란히 놓고, 원문 위에 메모를 단다.
  *
- * 쪽 위에 붙는 앵커 메모와 제대로 된 뷰어는 2단계다. 그 자리에 "곧 옵니다"
- * 를 두지 않는다 — 쓸 수 없는 것을 보여 주면 화면만 어지럽고, 대신 뷰어를
- * `pdf-frame.tsx` 로 떼어 두어 그때 그 파일만 갈아 끼우면 되게 했다.
+ * 왼쪽이 원문, 오른쪽이 글(서지정보 · 요약 · 메모)이다. 그 사이는 끌 수 있는
+ * 칸막이라 사람마다 원하는 비율로 둘 수 있다 — `split-pane.tsx`.
  *
  * 요약은 마크다운이다. 그리는 것은 `rich-text.tsx` 로, 채팅창이 에이전트
  * 답변을 그리는 것과 **같은 렌더러**다. 요약은 사람이 쓸 수도 에이전트가 쓸
  * 수도 있는데 둘이 다르게 보이면 안 된다. HTML 문자열을 만들지 않는 렌더러라
  * 남의 글이 섞여 들어와도 태그가 끼어들 자리가 없다.
+ *
+ * 메모 목록은 요약 **바로 아래**에 이어 둔다. 탭으로 가르지 않았다 — 요약을
+ * 다듬는 동안 방금 단 메모를 다시 보는 일이 잦은데, 탭이면 그때마다 둘 중
+ * 하나가 화면에서 사라진다. 둘 다 자주 보는 것이면 그냥 이어 놓는 편이 낫다.
+ *
+ * ## 서버를 부르는 자리는 여기 하나다
+ *
+ * 뷰어와 메모를 잇는 배선은 여기서 한다. 메모 목록도 적기 상자도 뷰어도 자기
+ * 것만 알고, "목록에서 누른 메모가 원문의 어디로 굴러가는지" 같은 것은 셋 다
+ * 알 수 없다. 둘을 함께 쥐고 있는 자리는 이 화면뿐이다.
+ *
+ * 메모를 고치는 요청도 그래서 여기서만 나간다. 메모 하나를 고치면 목록과 원문
+ * 위에 칠한 자리가 **같은 응답으로** 함께 바뀌어야 하는데, 부르는 자리가 둘로
+ * 갈리면 한쪽만 갱신된 화면이 생긴다.
  */
+
+/*
+ * 칸막이 비율을 기억할 칸.
+ *
+ * `paperbento.` 접두어는 `preferences.ts` 의 `STORAGE_KEYS` 와 같은 이유다 —
+ * 한 도메인에 `/paper` 와 `/memo` 를 나란히 얹으면 오리진이 같아지고,
+ * localStorage 는 경로를 구분하지 않아 두 앱이 같은 칸을 쓰게 된다. 앱 이름으로
+ * 갈라 두지 않으면 여기서 끈 폭이 옆 앱의 칸막이를 움직인다.
+ */
+const SPLIT_KEY = "paperbento.paperSplit";
+
+/**
+ * 뷰어는 이 화면에 들어올 때 비로소 받아 온다.
+ *
+ * pdf.js 는 워커까지 하면 1MB 급이다. 정적으로 물리면 서재 첫 화면까지 그
+ * 무게를 지고 뜨는데, 서재에서는 한 번도 쓰지 않는다. `ssr: false` 인 것은
+ * 골라잡을 여지가 없어서다 — pdf.js 는 `document` 와 `canvas` 가 있어야 산다.
+ *
+ * 받아 오는 동안 자리를 비워 두면 글 쪽이 잠깐 화면 전체로 벌어졌다가 되돌아온다.
+ * 뼈대를 세워 두는 것은 그 한 번의 출렁임을 없애기 위해서다.
+ */
+const PdfView = dynamic(() => import("./pdf-view").then((m) => m.PdfView), {
+  ssr: false,
+  loading: () => <PdfSkeleton />,
+});
+
 export function PaperDetail({
   paper: initialPaper,
   groupName,
@@ -62,11 +109,37 @@ export function PaperDetail({
   const [paper, setPaper] = useState(initialPaper);
   const [summary, setSummary] = useState<SummaryDTO | null>(initialSummary);
   const [editing, setEditing] = useState(false);
+  /** 서지정보를 폈는가. 기본은 접힘 — 자주 보는 것은 요약이다. */
+  const [bibOpen, setBibOpen] = useState(false);
   const [draft, setDraft] = useState(initialSummary?.body ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /*
+   * 메모.
+   *
+   * 서재 목록에는 실려 오지 않는다 — 한 화면에 수백 편이 오는데 거기에 메모
+   * 본문까지 실으면 첫 화면이 무거워진다. 상세에 들어와서 따로 받는다.
+   *
+   * 고치는 함수들이 **갱신된 목록 전체**를 돌려주므로 여기서 손으로 끼워 넣거나
+   * 빼지 않는다. 서버가 정한 순서(쪽 순 → 쪽 안에서 위에서 아래)가 그대로 이긴다.
+   */
+  const [notes, setNotes] = useState<NoteDTO[]>([]);
+  /** 지금 짚고 있는 메모. 목록에서도 원문 위에서도 함께 도드라진다. */
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  /** 서버를 부르는 중인 메모. 그 줄만 잠근다. */
+  const [busyNoteId, setBusyNoteId] = useState<string | null>(null);
+  /** 적기 상자. null 이면 안 뜬다. */
+  const [editorTarget, setEditorTarget] = useState<NoteEditorTarget | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
+  /** 뷰어가 못 떴다. 브라우저 기본 보기로 물러난다. */
+  const [viewerFailed, setViewerFailed] = useState(false);
+
+  const pdfRef = useRef<PdfViewHandle>(null);
+  /** 원문 칸의 상자. 적기 상자를 띄울 자리를 못 구했을 때 여기 한복판에 띄운다. */
+  const paneRef = useRef<HTMLDivElement>(null);
 
   // 서버가 다시 그려 주면(편집 후 refresh) 그 값이 이긴다.
   useEffect(() => setPaper(initialPaper), [initialPaper]);
@@ -76,6 +149,24 @@ export function PaperDetail({
     if (errorTimer.current) clearTimeout(errorTimer.current);
     errorTimer.current = setTimeout(() => setError(null), 6000);
   }, []);
+
+  const paperId = paper.id;
+  useEffect(() => {
+    /*
+     * 다 받기 전에 다른 논문으로 넘어갈 수 있다. 늦게 온 답이 새 화면의 목록을
+     * 덮어쓰면 남의 논문 메모가 원문 위에 칠해진다.
+     */
+    let alive = true;
+    api
+      .listNotes(paperId)
+      .then((rows) => {
+        if (alive) setNotes(rows);
+      })
+      .catch(fail);
+    return () => {
+      alive = false;
+    };
+  }, [paperId, fail]);
 
   /**
    * 읽기 상태·표식은 즉시 반영하고 서버는 뒤따라간다.
@@ -106,6 +197,90 @@ export function PaperDetail({
     }
   };
 
+  // ── 뷰어와 메모를 잇는 배선 ──────────────────────────────
+
+  /**
+   * 적기 상자를 띄울 화면 좌표.
+   *
+   * 뷰어에게 "그 자리가 지금 화면 어디냐" 를 묻는다. 아직 안 그려진 쪽이거나
+   * 기본 보기로 물러난 상태면 답이 없는데, 그때 상자를 안 띄우면 고칠 길이
+   * 아예 없어진다. 원문 칸 한복판이라도 띄우는 편이 낫다.
+   */
+  const pointFor = useCallback((anchor: Anchor) => {
+    const found = pdfRef.current?.anchorPoint(anchor);
+    if (found) return found;
+    const box = paneRef.current?.getBoundingClientRect();
+    if (box) return { x: box.left + box.width / 2, y: box.top + box.height / 3 };
+    return { x: window.innerWidth / 2, y: window.innerHeight / 3 };
+  }, []);
+
+  /** 목록에서 메모를 누르면 원문이 그 자리로 굴러간다. */
+  const focusNote = useCallback((note: NoteDTO) => {
+    setActiveNoteId(note.id);
+    // 뷰어가 못 떠서 기본 보기로 물러났으면 굴릴 자리가 없다. 짚은 표시만
+    // 남기고 조용히 지나간다 — 할 수 없는 일에 오류를 띄울 것은 아니다.
+    pdfRef.current?.scrollToAnchor(note.anchor);
+  }, []);
+
+  /** 원문에서 글자를 골랐다. 그 옆에 빈 상자를 띄운다. */
+  const beginNote = useCallback((anchor: Anchor, at: { x: number; y: number }) => {
+    setActiveNoteId(null);
+    setEditorTarget({ anchor, at });
+  }, []);
+
+  /** 목록에서 "고치기". 그 자리로 굴리고 상자를 띄운다. */
+  const editNote = useCallback(
+    (note: NoteDTO) => {
+      setActiveNoteId(note.id);
+      pdfRef.current?.scrollToAnchor(note.anchor);
+      /*
+       * 자리는 굴리기 **전** 좌표다. 다 굴러갈 때까지 기다렸다 재는 길도 있지만,
+       * 상자는 화면의 물건이라 몇십 픽셀 어긋나도 읽고 적는 데 지장이 없다.
+       * 그걸 맞추자고 기다리면 상자가 한 박자 늦게 뜬다.
+       */
+      setEditorTarget({ note, anchor: note.anchor, at: pointFor(note.anchor) });
+    },
+    [pointFor],
+  );
+
+  const saveNote = async (body: string, color: ItemColor | null) => {
+    const target = editorTarget;
+    if (!target) return;
+    setSavingNote(true);
+    try {
+      if (target.note) {
+        setNotes(await api.updateNote(paper.id, target.note.id, { body, color }));
+        setActiveNoteId(target.note.id);
+      } else {
+        const { notes: rows, noteId } = await api.createNote(paper.id, target.anchor, body, color);
+        setNotes(rows);
+        // 방금 적은 것을 짚어 둔다. 목록 어디에 꽂혔는지 눈으로 찾게 하지 않는다.
+        setActiveNoteId(noteId);
+      }
+      setEditorTarget(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const removeNote = async (note: NoteDTO) => {
+    setBusyNoteId(note.id);
+    try {
+      const { notes: rows } = await api.deleteNote(paper.id, note.id);
+      setNotes(rows);
+      setActiveNoteId((id) => (id === note.id ? null : id));
+      // 지운 메모를 고치던 중이었다면 상자도 함께 닫는다. 남아 있으면 저장이
+      // 이미 없는 메모를 향해 날아간다.
+      setEditorTarget((t) => (t?.note?.id === note.id ? null : t));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyNoteId(null);
+    }
+  };
+
   const cite = citationLine(paper);
   const tags = (paper.tags ?? "")
     .split(",")
@@ -114,32 +289,14 @@ export function PaperDetail({
 
   return (
     <main className="relative mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-5 px-6 py-8 lg:px-10">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <Link
-            href="/"
-            className="mt-0.5 flex shrink-0 items-center gap-2 text-sm text-(--color-fg-3) hover:text-(--color-fg)"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            서재로
-          </Link>
-          {/*
-            제목은 접히지 않는 자리에 둔다. 서지정보를 접어 두기로 했는데
-            제목까지 그 안에 있으면, 펼치기 전에는 무슨 논문을 보고 있는지
-            화면 어디에도 없다.
-          */}
-          <div className="min-w-0">
-            <p className="text-[11px] text-(--color-fg-4)">{groupName}</p>
-            <h1
-              className="truncate text-lg leading-snug text-(--color-fg)"
-              title={paper.title}
-              style={{ fontFamily: "var(--font-serif)" }}
-            >
-              {paper.title}
-            </h1>
-            {cite && <p className="truncate text-xs text-(--color-fg-3)">{cite}</p>}
-          </div>
-        </div>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href="/"
+          className="flex items-center gap-2 text-sm text-(--color-fg-3) hover:text-(--color-fg)"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          서재로
+        </Link>
 
         <div className="flex shrink-0 items-center gap-1.5">
           <ReadStateButton
@@ -173,93 +330,106 @@ export function PaperDetail({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => setSheet({ mode: "edit", groupId: paper.groupId, paper })}
-            className="flex items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-3 py-1.5 text-xs text-(--color-accent-strong) ring-1 ring-(--color-accent)/40 transition hover:bg-(--color-accent)/25"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            서지정보 편집
-          </button>
         </div>
       </header>
 
       {/*
-        넓은 화면에서는 **왼쪽에 PDF, 오른쪽에 글**을 나란히 둔다. 논문을 읽으며
-        요약을 적는 자리라 둘이 한 화면에 있어야 한다.
+        **왼쪽이 원문, 오른쪽이 글.** 논문을 읽으며 요약과 메모를 적는 자리라
+        둘이 한 화면에 있어야 한다. 폭은 고정하지 않고 끌게 둔다 — 그림이 많은
+        논문은 원문을 넓게, 요약을 길게 적는 사람은 글 쪽을 넓게 본다.
 
-        좁아지면 위아래로 쌓이는데, 그때는 글이 먼저다 — PDF 는 세로로 길어서
-        위에 놓으면 요약을 보려고 한참 굴려야 한다. `order` 로 뒤집는다.
+        좁아지면(xl 미만) 칸막이가 사라지고 위아래로 쌓이는데, 그때는 **글이
+        먼저**다 — 원문은 세로로 길어서 위에 놓으면 요약을 보려고 한참 굴려야 한다.
       */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
-        <div className="order-first flex min-w-0 flex-col gap-4 xl:order-last">
-          {/*
-            서지정보는 접어 둔다.
-            늘 펼쳐 두면 요약을 보려고 매번 그만큼 굴려야 한다. 자주 보는 것은
-            요약이고 DOI·초록은 가끔 확인하는 것이라, 자주 보는 쪽이 위에 와야 한다.
-          */}
-          <details className="group rounded-[var(--radius-card)] bg-(--color-surface) ring-1 ring-(--color-border-soft)">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-6 py-3.5 text-xs text-(--color-fg-3) select-none hover:text-(--color-fg)">
-              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-              서지 정보 펼치기
-            </summary>
-            <div className="px-6 pt-1 pb-6">
-            <dl className="flex flex-col gap-2 text-xs">
-              {paper.doi && <Meta label="DOI" value={paper.doi} href={`https://doi.org/${paper.doi}`} />}
-              {paper.arxivId && (
-                <Meta
-                  label="arXiv"
-                  value={paper.arxivId}
-                  href={`https://arxiv.org/abs/${paper.arxivId}`}
-                />
-              )}
-              {paper.file && (
-                <Meta
-                  label="파일"
-                  value={`${paper.file.name} · ${formatBytes(paper.file.size)}`}
-                  href={fileUrl(paper.file.id)}
-                />
-              )}
-            </dl>
+      <SplitPane
+        className="flex-1"
+        storageKey={SPLIT_KEY}
+        defaultRatio={0.58}
+        minRatio={0.3}
+        maxRatio={0.78}
+        stackFirst="right"
+        label="원문과 글 사이 폭 조절"
+        /*
+          원문은 글을 굴려도 제자리에 있어야 하므로 sticky 다. `self-start` 가
+          함께 있어야 한다 — flex 칸은 기본이 늘어나기(stretch)라 이미 줄 높이만큼
+          커져 있고, 그러면 붙을 여지가 없어 sticky 가 아무것도 안 한다.
 
-            {tags.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {tags.map((t) => (
-                  <span
-                    key={t}
-                    className="rounded-full bg-(--color-bg-2) px-2 py-0.5 text-[11px] text-(--color-fg-3) ring-1 ring-(--color-border-soft)"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
+          높이는 화면에 맞춘다. 논문은 한 쪽이 세로로 길어서, 창 높이를 다 쓰지
+          않으면 한 번에 몇 줄밖에 안 보인다.
+        */
+        leftClassName="h-[calc(100vh-8rem)] xl:sticky xl:top-6 xl:self-start"
+        rightClassName="gap-4"
+        left={
+          <div ref={paneRef} className="flex h-full min-h-0 flex-col gap-2">
+            {viewerFailed && (
+              /*
+                물러났다는 사실을 숨기지 않는다. 기본 보기로도 읽기는 되지만
+                메모를 달 수 없는데, 그걸 안 알려 주면 "글자를 골라도 아무 일이
+                안 일어난다" 가 고장으로 보인다.
+              */
+              <p className="flex shrink-0 items-start gap-1.5 rounded-lg bg-(--color-surface) px-3 py-2 text-[11px] leading-relaxed break-keep text-(--color-fg-3) ring-1 ring-(--color-border-soft)">
+                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-(--color-danger)" />
+                <span>
+                  원문 뷰어를 띄우지 못해 브라우저 기본 보기로 넘어갔습니다. 읽는 데는
+                  지장이 없지만 이 상태에서는 쪽 위에 메모를 달 수 없습니다.
+                </span>
+              </p>
             )}
 
-            {paper.abstract && (
-              <div className="mt-4 border-t border-(--color-border-soft) pt-3">
-                <p className="text-[11px] tracking-wider text-(--color-fg-4) uppercase">초록</p>
-                <p className="mt-2 text-[12.5px] leading-relaxed break-keep whitespace-pre-wrap text-(--color-fg-2)">
-                  {paper.abstract}
-                </p>
-              </div>
+            {paper.file && !viewerFailed ? (
+              <ViewerBoundary onFail={() => setViewerFailed(true)}>
+                <PdfView
+                  ref={pdfRef}
+                  fileId={paper.file.id}
+                  title={paper.title}
+                  notes={notes}
+                  activeNoteId={activeNoteId}
+                  onSelect={beginNote}
+                  onPickNote={setActiveNoteId}
+                  onFail={() => setViewerFailed(true)}
+                  className="min-h-0 flex-1"
+                />
+              </ViewerBoundary>
+            ) : (
+              <PdfFrame
+                fileId={paper.file?.id ?? null}
+                title={paper.title}
+                className="min-h-0 flex-1"
+              />
             )}
-            </div>
-          </details>
-
+          </div>
+        }
+        right={
+          <>
           {/* 요약 */}
           <section className="flex min-h-[260px] flex-col rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
             <header className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-medium text-(--color-fg)">요약</h2>
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="shrink-0 text-base font-medium text-(--color-fg)">요약</h2>
                 {summary?.source === "agent" && (
                   <span
-                    className="inline-flex items-center gap-1 rounded-full bg-(--color-accent-soft) px-1.5 py-0.5 text-[10px] text-(--color-accent-strong)"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-(--color-accent-soft) px-1.5 py-0.5 text-[10px] text-(--color-accent-strong)"
                     title={summary.instruction ?? "에이전트가 만든 요약"}
                   >
                     <Sparkles className="h-2.5 w-2.5" />
                     에이전트
                   </span>
                 )}
+                {/*
+                  서지정보를 펴는 손잡이. 제 카드를 따로 쓰지 않고 여기 붙는다.
+                  카드로 두면 늘 한 줄을 차지하는데, 정작 자주 보는 것은 요약이다.
+                */}
+                <button
+                  type="button"
+                  onClick={() => setBibOpen((v) => !v)}
+                  aria-expanded={bibOpen}
+                  className="flex min-w-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] text-(--color-fg-4) transition hover:bg-(--color-bg-2) hover:text-(--color-fg-2)"
+                >
+                  <ChevronRight
+                    className={cn("h-3 w-3 shrink-0 transition-transform", bibOpen && "rotate-90")}
+                  />
+                  <span className="truncate">{bibOpen ? "서지 정보 접기" : "서지 정보 펼치기"}</span>
+                </button>
               </div>
 
               <button
@@ -274,6 +444,77 @@ export function PaperDetail({
                 {editing ? "보기" : "고치기"}
               </button>
             </header>
+
+            {/*
+              펼친 서지정보.
+              제목도 여기 있다 — 논문을 가리키는 것들은 한자리에 모아 둔다.
+              고치는 단추도 여기 둔다. 위쪽 머리말에 따로 두면 "서지정보" 라는
+              한 가지가 화면 두 곳에 흩어진다.
+            */}
+            {bibOpen && (
+              <div className="mb-4 border-b border-(--color-border-soft) pb-4">
+                <p className="mb-1 text-[11px] text-(--color-fg-4)">{groupName}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <h1
+                    className="min-w-0 text-lg leading-snug break-keep text-(--color-fg)"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                  >
+                    {paper.title}
+                  </h1>
+                  <button
+                    type="button"
+                    onClick={() => setSheet({ mode: "edit", groupId: paper.groupId, paper })}
+                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2.5 py-1 text-[11px] text-(--color-accent-strong) ring-1 ring-(--color-accent)/40 transition hover:bg-(--color-accent)/25"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    고치기
+                  </button>
+                </div>
+                {cite && <p className="mt-1 text-xs text-(--color-fg-3)">{cite}</p>}
+
+                <dl className="mt-3 flex flex-col gap-2 text-xs">
+                  {paper.doi && (
+                    <Meta label="DOI" value={paper.doi} href={`https://doi.org/${paper.doi}`} />
+                  )}
+                  {paper.arxivId && (
+                    <Meta
+                      label="arXiv"
+                      value={paper.arxivId}
+                      href={`https://arxiv.org/abs/${paper.arxivId}`}
+                    />
+                  )}
+                  {paper.file && (
+                    <Meta
+                      label="파일"
+                      value={`${paper.file.name} · ${formatBytes(paper.file.size)}`}
+                      href={fileUrl(paper.file.id)}
+                    />
+                  )}
+                </dl>
+
+                {tags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full bg-(--color-bg-2) px-2 py-0.5 text-[11px] text-(--color-fg-3) ring-1 ring-(--color-border-soft)"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {paper.abstract && (
+                  <div className="mt-3">
+                    <p className="text-[11px] tracking-wider text-(--color-fg-4) uppercase">초록</p>
+                    <p className="mt-1.5 text-[12.5px] leading-relaxed break-keep whitespace-pre-wrap text-(--color-fg-2)">
+                      {paper.abstract}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {editing ? (
               <>
@@ -337,19 +578,41 @@ export function PaperDetail({
               </button>
             )}
           </section>
-        </div>
 
-        {/*
-          PDF. 왼쪽 글을 굴려도 원문은 제자리에 있어야 하므로 sticky 다.
-          높이는 화면에 맞춘다 — 논문은 한 쪽이 세로로 길어서, 창 높이를 다
-          쓰지 않으면 한 번에 몇 줄밖에 안 보인다.
-        */}
-        <PdfFrame
-          fileId={paper.file?.id ?? null}
-          title={paper.title}
-          className="h-[calc(100vh-8rem)] xl:sticky xl:top-6"
-        />
-      </div>
+          {/*
+            메모. 요약 바로 아래에 이어 둔다 — 탭으로 가르지 않은 이유는 파일
+            맨 위에 적었다.
+          */}
+          <section className="flex flex-col rounded-[var(--radius-card)] bg-(--color-surface) pb-2 ring-1 ring-(--color-border-soft)">
+            <header className="flex items-center justify-between gap-2 px-6 py-4">
+              <h2 className="text-base font-medium text-(--color-fg)">메모</h2>
+              {notes.length > 0 && (
+                <span className="text-[11px] text-(--color-fg-4)">{notes.length}개</span>
+              )}
+            </header>
+            <NoteList
+              notes={notes}
+              activeId={activeNoteId}
+              busyId={busyNoteId}
+              onSelect={focusNote}
+              onEdit={editNote}
+              onDelete={(note) => void removeNote(note)}
+            />
+          </section>
+          </>
+        }
+      />
+
+      {/*
+        적기 상자는 칸 안이 아니라 화면 위에 뜬다(`position: fixed`). 고른 글자를
+        따라다녀야 하는데, 굴러가는 칸 안에 넣으면 함께 사라진다.
+      */}
+      <NoteEditor
+        target={editorTarget}
+        saving={savingNote}
+        onSave={(body, color) => void saveNote(body, color)}
+        onCancel={() => setEditorTarget(null)}
+      />
 
       <PaperSheet
         target={sheet}
@@ -378,6 +641,59 @@ export function PaperDetail({
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * 뷰어가 터졌을 때 화면 전체를 데려가지 않게 막는 울타리.
+ *
+ * pdf.js 는 워커와 청크를 따로 받아 온다. 그게 막히거나(사내 프록시, 오프라인,
+ * 배포 중 갈린 청크) 워커가 안 서면 뷰어는 그리는 도중 예외를 던지고, 울타리가
+ * 없으면 이 화면이 통째로 하얘진다 — 요약도 서지정보도 함께 사라진다. **원문을
+ * 못 보는 것과 화면을 통째로 잃는 것은 다른 일이다.**
+ *
+ * 잡으면 부모가 `pdf-frame.tsx` 로 물러난다. 브라우저 내장 뷰어는 워커도 청크도
+ * 필요 없어서, 우리 뷰어가 못 서는 자리에서도 읽기는 된다.
+ *
+ * React 의 오류 경계는 아직 클래스로만 만들 수 있다.
+ */
+class ViewerBoundary extends Component<
+  { onFail: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(err: unknown) {
+    // 무엇이 터졌는지는 콘솔에 남긴다. 화면에는 사람 말로 한 줄만 뜬다.
+    console.error("[pdf-view] 원문 뷰어를 띄우지 못했습니다", err);
+    this.props.onFail();
+  }
+
+  render() {
+    // 부모가 곧 우리를 걷어내고 기본 보기를 세운다. 그 한 프레임을 비워 둔다.
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/**
+ * 뷰어를 받아 오는 동안 세워 두는 뼈대.
+ *
+ * 크기를 밖에서 못 받는다 — `next/dynamic` 의 `loading` 은 props 를 못 받기
+ * 때문이다. 그래서 부르는 쪽의 칸에 맞는 값을 여기 박아 둔다. 뷰어에 준
+ * `min-h-0 flex-1` 과 같아야 자리를 정확히 지킨다.
+ */
+function PdfSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center rounded-[var(--radius-app)] bg-(--color-bg-2) ring-1 ring-(--color-border-soft)">
+      <div className="flex flex-col items-center gap-2 text-(--color-fg-4)">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-xs">원문을 여는 중…</span>
+      </div>
+    </div>
   );
 }
 
