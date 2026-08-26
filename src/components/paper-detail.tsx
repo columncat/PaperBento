@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronRight,
   Download,
   ExternalLink,
   Eye,
@@ -113,16 +114,34 @@ export function PaperDetail({
 
   return (
     <main className="relative mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-5 px-6 py-8 lg:px-10">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-sm text-(--color-fg-3) hover:text-(--color-fg)"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          서재로
-        </Link>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <Link
+            href="/"
+            className="mt-0.5 flex shrink-0 items-center gap-2 text-sm text-(--color-fg-3) hover:text-(--color-fg)"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            서재로
+          </Link>
+          {/*
+            제목은 접히지 않는 자리에 둔다. 서지정보를 접어 두기로 했는데
+            제목까지 그 안에 있으면, 펼치기 전에는 무슨 논문을 보고 있는지
+            화면 어디에도 없다.
+          */}
+          <div className="min-w-0">
+            <p className="text-[11px] text-(--color-fg-4)">{groupName}</p>
+            <h1
+              className="truncate text-lg leading-snug text-(--color-fg)"
+              title={paper.title}
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              {paper.title}
+            </h1>
+            {cite && <p className="truncate text-xs text-(--color-fg-3)">{cite}</p>}
+          </div>
+        </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <ReadStateButton
             state={paper.readState}
             onChange={(readState) => patch({ readState })}
@@ -166,23 +185,26 @@ export function PaperDetail({
       </header>
 
       {/*
-        넓은 화면에서는 왼쪽에 글, 오른쪽에 PDF 를 나란히 둔다. 논문을 읽으며
-        요약을 적는 자리라 둘이 한 화면에 있어야 한다. 좁아지면 위아래로 쌓인다.
-      */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          {/* 서지정보 */}
-          <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-            <p className="mb-1 text-[11px] text-(--color-fg-4)">{groupName}</p>
-            <h1
-              className="text-xl leading-snug break-keep text-(--color-fg)"
-              style={{ fontFamily: "var(--font-serif)" }}
-            >
-              {paper.title}
-            </h1>
-            {cite && <p className="mt-1.5 text-sm text-(--color-fg-3)">{cite}</p>}
+        넓은 화면에서는 **왼쪽에 PDF, 오른쪽에 글**을 나란히 둔다. 논문을 읽으며
+        요약을 적는 자리라 둘이 한 화면에 있어야 한다.
 
-            <dl className="mt-4 flex flex-col gap-2 text-xs">
+        좁아지면 위아래로 쌓이는데, 그때는 글이 먼저다 — PDF 는 세로로 길어서
+        위에 놓으면 요약을 보려고 한참 굴려야 한다. `order` 로 뒤집는다.
+      */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
+        <div className="order-first flex min-w-0 flex-col gap-4 xl:order-last">
+          {/*
+            서지정보는 접어 둔다.
+            늘 펼쳐 두면 요약을 보려고 매번 그만큼 굴려야 한다. 자주 보는 것은
+            요약이고 DOI·초록은 가끔 확인하는 것이라, 자주 보는 쪽이 위에 와야 한다.
+          */}
+          <details className="group rounded-[var(--radius-card)] bg-(--color-surface) ring-1 ring-(--color-border-soft)">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-6 py-3.5 text-xs text-(--color-fg-3) select-none hover:text-(--color-fg)">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+              서지 정보 펼치기
+            </summary>
+            <div className="px-6 pt-1 pb-6">
+            <dl className="flex flex-col gap-2 text-xs">
               {paper.doi && <Meta label="DOI" value={paper.doi} href={`https://doi.org/${paper.doi}`} />}
               {paper.arxivId && (
                 <Meta
@@ -214,16 +236,15 @@ export function PaperDetail({
             )}
 
             {paper.abstract && (
-              <details className="mt-4 border-t border-(--color-border-soft) pt-3">
-                <summary className="cursor-pointer text-[11px] tracking-wider text-(--color-fg-4) uppercase select-none">
-                  초록
-                </summary>
+              <div className="mt-4 border-t border-(--color-border-soft) pt-3">
+                <p className="text-[11px] tracking-wider text-(--color-fg-4) uppercase">초록</p>
                 <p className="mt-2 text-[12.5px] leading-relaxed break-keep whitespace-pre-wrap text-(--color-fg-2)">
                   {paper.abstract}
                 </p>
-              </details>
+              </div>
             )}
-          </section>
+            </div>
+          </details>
 
           {/* 요약 */}
           <section className="flex min-h-[260px] flex-col rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
