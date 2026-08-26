@@ -29,6 +29,7 @@ import {
 import { anchorFromSelection, pageFrame, ratioStyle } from "@/lib/anchor";
 import { loadPdfViewer, TextLayerMode, type PdfjsUi } from "@/lib/pdfjs";
 import { fileUrl, type Anchor, type NoteDTO } from "@/lib/types";
+import { apiPath } from "@/lib/api-path";
 import { cn } from "@/lib/utils";
 
 import { NoteLayer, useRenderedPages } from "./note-layer";
@@ -395,6 +396,24 @@ export const PdfView = forwardRef<PdfViewHandle, PdfViewProps>(function PdfView(
            */
           disableAutoFetch: true,
           rangeChunkSize: 128 * 1024,
+          /*
+           * 한글·한자 논문을 위한 것.
+           *
+           * CJK PDF 는 글자를 유니코드로 담지 않고 "이 글꼴의 몇 번째 글자" 로
+           * 가리키는 일이 흔하다. 그 번호를 글자로 옮기는 표가 CMap 인데,
+           * pdf.js 는 이 표를 번들에 넣지 않고 **주소로 받아 간다.** 안 주면
+           * 그 논문은 글자가 통째로 빠지거나 네모로 나온다.
+           *
+           * 라틴 문자는 시스템 글꼴로 곱게 물러나서 이 구멍이 한동안 안 보인다 —
+           * 영어 논문만 열어 보는 동안에는 아무 일도 없다.
+           *
+           * 자산은 `scripts/copy-pdfjs-assets.mjs` 가 빌드 전에 `public/pdfjs/`
+           * 로 옮긴다. 주소는 `apiPath()` 를 타야 한다 (하위 경로 배포).
+           * 끝의 슬래시가 없으면 pdf.js 가 파일 이름을 그대로 이어 붙여 깨진다.
+           */
+          cMapUrl: apiPath("/pdfjs/cmaps/"),
+          cMapPacked: true,
+          standardFontDataUrl: apiPath("/pdfjs/standard_fonts/"),
           // 남의 PDF 안의 식을 eval 로 돌리지 않는다. 폼을 안 그리므로 잃는 것도 없다.
           isEvalSupported: false,
           enableXfa: false,

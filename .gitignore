@@ -34,3 +34,7 @@ npm-debug.log*
 # os
 .DS_Store
 Thumbs.db
+
+# pdf.js 의 CMap·기본 글꼴 (CJK 논문에 필요).
+# node_modules 에서 빌드 때마다 옮겨 오는 것이라 저장소에 둘 이유가 없다.
+public/pdfjs/
