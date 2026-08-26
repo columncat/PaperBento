@@ -266,21 +266,27 @@ export function PaperSheet({
     setFields((f) => ({ ...f, [k]: v, csl: JSON.stringify(picked.csl) }) as Fields);
   };
 
-  /** 머리의 "전부 적용". **이미 적힌 칸은 건드리지 않는다.** */
-  const applyAll = () => {
-    if (!picked) return;
-    setFields((f) => {
-      const next: Record<string, unknown> = { ...f, csl: JSON.stringify(picked.csl) };
-      for (const k of SUGGEST_KEYS) {
-        const v = picked.fields[k];
-        if (v === null || v === undefined) continue;
-        const cur = f[k];
-        if (cur !== null && cur !== undefined && String(cur).trim() !== "") continue;
-        next[k] = v;
-      }
-      return next as Fields;
-    });
+  /**
+   * 빈 칸에 찾아온 값을 채워 넣은 것을 돌려준다. **이미 적힌 칸은 건드리지 않는다.**
+   *
+   * "전부 적용" 과 저장이 **같은 함수를 쓴다.** 회색으로 보이던 값이 저장하면
+   * 사라지는 일이 없어야 하는데, 규칙을 두 벌로 적어 두면 한쪽만 고치는 날이 온다.
+   */
+  const withSuggestions = (f: Fields): Fields => {
+    if (!picked) return f;
+    const next: Record<string, unknown> = { ...f, csl: JSON.stringify(picked.csl) };
+    for (const k of SUGGEST_KEYS) {
+      const v = picked.fields[k];
+      if (v === null || v === undefined) continue;
+      const cur = f[k];
+      if (cur !== null && cur !== undefined && String(cur).trim() !== "") continue;
+      next[k] = v;
+    }
+    return next as Fields;
   };
+
+  /** 머리의 "전부 적용". */
+  const applyAll = () => setFields(withSuggestions);
 
   /** 빈 칸이면 찾아온 값을 회색 글씨(플레이스홀더)로 미리 보여 준다. */
   const ph = (k: SuggestKey, fallback: string): string => {
@@ -300,7 +306,16 @@ export function PaperSheet({
     if (busy) return;
     setBusy(true);
     try {
-      await onSubmit(groupId, fields);
+      /*
+       * 회색으로 보이던 제안을 그대로 저장한다.
+       *
+       * 예전에는 "전부 적용" 을 눌러야만 들어갔다. 화면에는 값이 보이는데
+       * 저장하면 빈 칸이 되는 셈이라, 눌렀는지 안 눌렀는지를 사람이 기억해야
+       * 했다. 보이는 것이 저장되는 것과 같아야 한다.
+       *
+       * 이미 적어 둔 칸은 여전히 안 덮는다 — 그건 사람이 고른 값이다.
+       */
+      await onSubmit(groupId, withSuggestions(fields));
       onClose();
     } catch {
       // 실패하면 시트를 닫지 않는다. 닫아 버리면 적어 둔 저자와 초록이

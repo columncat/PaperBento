@@ -208,32 +208,49 @@ export function SummaryRun({
     }
   };
 
-  if (!open) {
-    return (
+  /*
+   * 단추는 늘 제자리에 있고, 상자는 그 위에 **띄워서** 그린다.
+   *
+   * 예전에는 열 때 단추를 상자로 갈아 끼웠다. 그러면 상자가 요약 칸 안에서
+   * 자리를 차지해 **칸이 통째로 커졌다가 닫으면 다시 줄어든다.** 읽던 요약이
+   * 아래로 밀려나고, 닫으면 되돌아오는데, 그 사이 눈이 따라가야 한다.
+   *
+   * `absolute` 라 흐름에서 빠져 있어 뒤의 것이 움직이지 않는다. 오른쪽에
+   * 붙이는 것은 이 단추가 칸 오른쪽 끝에 있어서다 — 왼쪽으로 열면 화면 밖으로
+   * 나간다.
+   */
+  return (
+    <div className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => {
-          setOpen(true);
+          setOpen((v) => !v);
           setError(null);
         }}
+        aria-expanded={open}
         className={cn(
-          "flex items-center gap-1.5 rounded-full bg-(--color-bg-2) px-3 py-1.5 text-[11px] text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-hi)",
-          className,
+          "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] ring-1 transition",
+          open
+            ? "bg-(--color-accent-soft) text-(--color-accent-strong) ring-(--color-accent)/40"
+            : "bg-(--color-bg-2) text-(--color-fg-2) ring-(--color-border-soft) hover:bg-(--color-surface-hi)",
         )}
       >
         <Sparkles className="h-3 w-3" />
         에이전트에게 맡기기
       </button>
-    );
-  }
 
-  return (
-    <div
-      className={cn(
-        "rounded-lg bg-(--color-bg-2) p-4 ring-1 ring-(--color-border-soft)",
-        className,
-      )}
-    >
+      {open && (
+        <>
+          {/*
+            바깥을 눌러 닫는 자리. 상자보다 뒤에 깔린다.
+            적어 둔 지시문이 있어도 실행 전이므로 닫아도 잃을 것이 없다.
+          */}
+          <div
+            className="fixed inset-0 z-20"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div className="absolute top-full right-0 z-30 mt-2 w-[min(30rem,calc(100vw-3rem))] rounded-lg bg-(--color-surface-2) p-4 shadow-lg ring-1 ring-(--color-border-soft)">
       <header className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs text-(--color-fg-2)">
           <Sparkles className="h-3.5 w-3.5 text-(--color-accent-strong)" />
@@ -395,6 +412,9 @@ export function SummaryRun({
           {running ? "만드는 중" : "실행"}
         </button>
       </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

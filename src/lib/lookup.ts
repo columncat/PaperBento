@@ -588,7 +588,28 @@ export async function lookupByTitle(rawTitle: string): Promise<LookupResult[]> {
     if (item) out.push(toResult("crossref", item, score));
   }
   if (out.length === 0) throw new LookupError("받은 것에서 서지정보를 찾지 못했습니다");
-  return out;
+  return rankCandidates(out);
+}
+
+/**
+ * 채울 칸이 가장 많은 후보를 앞으로.
+ *
+ * Crossref 의 `score` 는 **글자가 얼마나 닮았는지**를 재지, 서지정보가 얼마나
+ * 갖춰졌는지는 보지 않는다. 그래서 제목만 덜렁 있고 저널·연도·쪽이 빈 항목이
+ * 1등으로 오는 일이 잦다 — 사람은 그걸 고르고서 나머지를 손으로 적게 된다.
+ *
+ * 채워진 칸 수를 먼저 보고, 같으면 그때 `score` 로 가른다. 후보 목록 자체는
+ * 그대로 둔다 — 고르는 것은 사람이고, 우리는 순서만 바꾼다.
+ */
+function rankCandidates(list: LookupResult[]): LookupResult[] {
+  const filled = (r: LookupResult) =>
+    Object.values(r.fields).filter(
+      (v) => v !== null && v !== undefined && String(v).trim() !== "",
+    ).length;
+  // 원본을 건드리지 않는다. 부르는 쪽이 같은 배열을 또 쓸 수 있다.
+  return [...list].sort(
+    (a, b) => filled(b) - filled(a) || (b.score ?? 0) - (a.score ?? 0),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -667,7 +688,7 @@ export async function lookup(q: LookupQuery): Promise<LookupReport> {
         source: "crossref",
         query: title,
         ok: true,
-        note: `후보 ${found.length}개를 찾았습니다. 맞는 것을 고르세요`,
+        note: `후보 ${found.length}개를 찾았습니다. 서지정보가 가장 갖춰진 것을 앞에 두었습니다`,
       });
       return { candidates: found, steps };
     } catch (e) {
