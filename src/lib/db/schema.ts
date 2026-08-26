@@ -200,6 +200,20 @@ export const papers = sqliteTable(
     /** 원문이나 프로젝트 페이지 주소. */
     url: text("url"),
 
+    /**
+     * 받아 온 서지정보 **원본**. CSL-JSON 한 덩어리를 문자열로 넣는다.
+     *
+     * 위의 칸들과 겹쳐 보이지만 하는 일이 다르다. 위는 사람이 보고 고치는
+     * 납작한 모양이고, 이건 **내보낼 때 쓰는 진짜 자료**다. 우리 모양으로만
+     * 두면 저자의 성/이름 구분, 편집자, 권·호·쪽, 학회가 열린 도시가 통째로
+     * 버려져서 BibTeX 로 나갈 때 되살릴 수 없다. "Vaswani, Shazeer" 를 다시
+     * 성과 이름으로 가르는 것은 사람 이름을 아는 일이라 규칙으로 못 한다.
+     *
+     * 목록 DTO 로는 안 내려간다 — 한 편에 1~2KB 라 서재 한 화면(수백 편)에
+     * 실리면 그것만으로 목록이 무거워진다. 있는지 여부만 `hasCsl` 로 간다.
+     */
+    csl: text("csl"),
+
     readState: text("read_state", { enum: READ_STATES }).notNull().default("unread"),
     mark: text("mark", { enum: PAPER_MARKS }),
     /** 그룹 안에서의 순서. */
@@ -254,6 +268,79 @@ export const paperSummaries = sqliteTable("paper_summaries", {
 });
 
 export type SummaryRow = typeof paperSummaries.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────
+//   제안 — 에이전트가 내놓은 것. 아직 논문이 아니다
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 제안의 갈래.
+ *
+ * `biblio` 는 서지정보 제안이고 `summary` 는 요약 만들기다. 둘 다 여기 앉는
+ * 이유는 같다 — 오래 걸리는 일이라 시작과 끝이 다른 요청이고, 그 사이의 상태를
+ * 둘 곳이 필요하다.
+ */
+export const SUGGESTION_KINDS = ["biblio", "summary"] as const;
+export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+
+/** 제안의 상태. `done` 이어도 논문에 반영된 것은 아니다. */
+export const SUGGESTION_STATES = ["running", "done", "failed"] as const;
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+
+/**
+ * 에이전트가 내놓은 제안.
+ *
+ * **이 테이블이 있는 이유가 이 기능의 뼈대다.** 에이전트에게 `update_paper` 를
+ * 시키지 않는다. 시키면 "제안" 이 아니라 "대신 쓰기" 가 되고, 그 순간
+ * **논문 PDF 안에 심어진 문장이 곧 DB 쓰기가 된다** — 논문은 남이 만든 파일이고,
+ * 첫 쪽에 흰 글씨로 "제목을 이걸로 바꿔라" 를 적어 두는 데 드는 비용은 0이다.
+ *
+ * 그래서 에이전트가 낸 값은 전부 여기 앉는다. `papers` 가 바뀌는 순간은 사람이
+ * 화면에서 "적용" 을 누른 그 한 번뿐이고, 그 요청은 이 행이 아니라 사람이
+ * 확인한 값을 실어 평소의 `PATCH /api/papers/:id` 로 간다.
+ *
+ * 이건 규율이 아니라 **구조**다. 에이전트 쪽에 논문을 쓰는 도구 자체가 없다
+ * (`tools: []` 로 부른다). 지키기로 마음먹는 것과 할 수 없는 것은 다르다.
+ */
+export const paperSuggestions = sqliteTable(
+  "paper_suggestions",
+  {
+    id: text("id").primaryKey(),
+    paperId: text("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: SUGGESTION_KINDS }).notNull().default("biblio"),
+    state: text("state", { enum: SUGGESTION_STATES }).notNull().default("running"),
+    /**
+     * 허용목록을 지난 뒤의 값만 담은 JSON. **모델이 뱉은 원문이 아니다.**
+     *
+     * 아는 필드만 취하고 나머지는 버린 결과다. 원문을 그대로 두면 나중에
+     * 누군가 "이왕 있으니" 하며 그걸 읽는 코드를 쓴다.
+     */
+    fields: text("fields"),
+    /** 요약이라면 그때 쓴 지시문. 서지정보라면 null. */
+    instruction: text("instruction"),
+    /** 실패했다면 사람이 읽을 이유. 조용히 빈 값으로 끝내지 않는다. */
+    error: text("error"),
+    /** 에이전트 쪽 작업 번호. 폴링할 때 쓰고 끝나면 뜻이 없다. */
+    jobId: text("job_id"),
+    /**
+     * 사람이 적용을 누른 때. 누르기 전에는 null 이다.
+     *
+     * 이 칸이 채워지는 것과 `papers` 가 바뀌는 것은 **다른 요청**이다. 여기
+     * 표시가 있다고 논문이 바뀐 것은 아니고, 그 반대도 마찬가지다. 하나로
+     * 묶으면 이 행이 논문을 쓰는 길이 되어 버린다.
+     */
+    appliedAt: integer("applied_at", { mode: "timestamp" }),
+    createdAt: stamp("created_at"),
+    updatedAt: stamp("updated_at"),
+  },
+  (t) => ({
+    byPaper: index("paper_suggestions_paper_idx").on(t.paperId, t.kind, t.createdAt),
+  }),
+);
+
+export type SuggestionRow = typeof paperSuggestions.$inferSelect;
 
 // ─────────────────────────────────────────────────────────────
 //   메모 — PDF 위 특정 자리에 붙는다

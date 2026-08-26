@@ -45,6 +45,17 @@ const patchSchema = z.object({
    * 잇달아 부를 때 같은 PDF 를 두 번 뜯지 않으려고 캐시하는 것이다.
    */
   headText: z.string().max(200000).nullable().optional(),
+  /**
+   * 받아 온 서지정보 원본 (CSL-JSON 문자열).
+   *
+   * **여기 없으면 zod 가 조용히 버린다.** `z.object` 는 모르는 칸을 오류로
+   * 만들지 않고 그냥 떼어 내므로, 시트가 잘 보내도 서버까지 닿지 않는다.
+   *
+   * 안 실려 오면 손대지 않고, `null` 이 실려 오면 그때는 진짜로 뗀다
+   * (`updatePaper` 가 `undefined` 와 `null` 을 가른다). 이 구분이 없으면
+   * 제목만 고쳐 저장할 때마다 원본이 지워진다.
+   */
+  csl: z.string().max(100000).nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -70,10 +81,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
    * 논문 앞부분 수천 자가 통째로 활동 기록에 쌓인다. 기록은 "무엇을 했는가" 를
    * 보는 자리이지 자료를 다시 담는 자리가 아니다.
    */
-  const { headText, ...loggable } = parsed.data;
+  const { headText, csl, ...loggable } = parsed.data;
   logAgent(req, "논문 고치기", before?.title ?? id, {
     ...loggable,
     ...(headText === undefined ? {} : { headText: headText === null ? null : `${headText.length}자` }),
+    // csl 도 같은 이유로 통째로 싣지 않는다 — 한 편에 1~2KB 라 기록이 자료
+    // 보관소가 되어 버린다. 붙었는지 떼었는지만 남긴다.
+    ...(csl === undefined ? {} : { csl: csl === null ? null : `CSL ${csl.length}자` }),
   });
   return NextResponse.json({ groups: listGroups() });
 }

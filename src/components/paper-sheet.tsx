@@ -1,11 +1,20 @@
 "use client";
 
-import { AlertTriangle, FileText, Loader2, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, FileText, Loader2, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type PaperInput } from "@/lib/client-api";
-import { coverUrl, formatBytes, paperUrl, type GroupDTO, type PaperDTO } from "@/lib/types";
+import {
+  coverUrl,
+  formatBytes,
+  paperUrl,
+  type GroupDTO,
+  type LookupReport,
+  type LookupResult,
+  type LookupSource,
+  type PaperDTO,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,7 +51,37 @@ type Fields = Required<
     PaperInput,
     "title" | "authors" | "venue" | "year" | "doi" | "arxivId" | "abstract" | "tags" | "url"
   >
->;
+> & {
+  /**
+   * 찾아온 서지정보의 **원본**(CSL-JSON 문자열).
+   *
+   * 다른 칸과 달리 `Required` 밖에 둔다 — 있을 때만 실려 나가야 하기 때문이다.
+   * 서재 목록도 상세도 csl 본문은 안 받아 오므로(한 편에 1~2KB 라 무겁다) 시트가
+   * 열릴 때 이 값은 **늘 비어 있다.** 이걸 다른 칸처럼 늘 실어 보내면 제목만
+   * 고쳐 저장하는 순간 서버가 `csl: null` 을 받아 애써 받아 둔 원본을 지운다.
+   * 그래서 찾아온 후보를 적용했을 때만 채운다.
+   */
+  csl?: string;
+};
+
+/** 찾아오기가 제안할 수 있는 칸. 태그는 바깥에서 오지 않는다. */
+const SUGGEST_KEYS = [
+  "title",
+  "authors",
+  "venue",
+  "year",
+  "doi",
+  "arxivId",
+  "url",
+  "abstract",
+] as const;
+type SuggestKey = (typeof SUGGEST_KEYS)[number];
+
+const SOURCE_LABEL: Record<LookupSource, string> = {
+  doi: "DOI",
+  arxiv: "arXiv",
+  crossref: "제목 검색",
+};
 
 const EMPTY: Fields = {
   title: "",
@@ -89,6 +128,18 @@ export function PaperSheet({
   const [dups, setDups] = useState<{ id: string; title: string }[]>([]);
   const titleRef = useRef<HTMLInputElement | null>(null);
 
+  /*
+   * 찾아오기 상태.
+   *
+   * `report` 는 거쳐 온 길까지 담고 있어서 실패했을 때도 버리지 않는다.
+   * `picked` 는 사람이 고른 후보 — 제목으로 찾으면 후보가 여럿이라 우리가
+   * 고르면 안 된다. 하나뿐이면 고를 것이 없으므로 저절로 정해진다.
+   */
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [report, setReport] = useState<LookupReport | null>(null);
+  const [picked, setPicked] = useState<LookupResult | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
   // 열릴 때마다 값을 새로 심는다. 앞서 열었던 논문의 저자가 남아 있으면
   // 그걸 그대로 저장해 버리는 사고가 난다.
   useEffect(() => {
@@ -96,6 +147,11 @@ export function PaperSheet({
     setFields(fieldsOf(target));
     setGroupId(target.groupId);
     setDups([]);
+    // 앞 논문의 후보가 남아 있으면 남의 서지정보를 제안하게 된다.
+    setReport(null);
+    setPicked(null);
+    setLookupError(null);
+    setLookupBusy(false);
     // 방금 올린 것의 제목은 파일 이름에서 딴 짐작이라 거의 늘 고쳐야 한다.
     // 열자마자 통째로 골라 둔다 — 바로 덮어쓸 수 있게.
     queueMicrotask(() => titleRef.current?.select());
@@ -154,6 +210,91 @@ export function PaperSheet({
 
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) =>
     setFields((f) => ({ ...f, [k]: v }));
+
+  // ── 찾아오기 ──────────────────────────────────────────────
+
+  const canLookup =
+    Boolean(fields.doi?.trim()) ||
+    Boolean(fields.arxivId?.trim()) ||
+    (fields.title?.trim().length ?? 0) >= 4;
+
+  /**
+   * 세 칸을 **함께** 보낸다. 무엇으로 찾을지는 서버가 정한다 (DOI → arXiv → 제목).
+   *
+   * 사람에게 "어느 것으로 찾을까요" 를 묻지 않는 이유는, 물어봤자 답이 늘
+   * "있는 것으로" 이기 때문이다.
+   */
+  const runLookup = async () => {
+    if (lookupBusy || !canLookup) return;
+    setLookupBusy(true);
+    setLookupError(null);
+    setReport(null);
+    setPicked(null);
+    try {
+      const r = await api.lookup({
+        doi: fields.doi,
+        arxiv: fields.arxivId,
+        title: fields.title,
+      });
+      setReport(r);
+      // 후보가 하나뿐이면 고를 것이 없다. 바로 제안으로 편다.
+      if (r.candidates.length === 1) setPicked(r.candidates[0]);
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : "찾아오기에 실패했습니다");
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
+  const isBlank = (k: SuggestKey): boolean => {
+    const v = fields[k];
+    return v === null || v === undefined || String(v).trim() === "";
+  };
+
+  /**
+   * 후보 하나를 그 칸에 넣는다. **csl 원본도 함께 붙인다.**
+   *
+   * 원본은 마지막으로 무언가를 가져온 후보의 것이 된다. 두 후보에서 한 칸씩
+   * 집어 오면 원본과 우리 칸이 어긋날 수 있는데, 그래도 원본을 안 붙이는 것보다
+   * 낫다 — 내보낼 때 `toCSL` 이 사람이 고친 우리 칸을 위에 덮기 때문에, 어긋난
+   * 자리는 사람이 보고 있는 값으로 정리된다.
+   */
+  const applyOne = (k: SuggestKey) => {
+    if (!picked) return;
+    const v = picked.fields[k];
+    if (v === null || v === undefined) return;
+    setFields((f) => ({ ...f, [k]: v, csl: JSON.stringify(picked.csl) }) as Fields);
+  };
+
+  /** 머리의 "전부 적용". **이미 적힌 칸은 건드리지 않는다.** */
+  const applyAll = () => {
+    if (!picked) return;
+    setFields((f) => {
+      const next: Record<string, unknown> = { ...f, csl: JSON.stringify(picked.csl) };
+      for (const k of SUGGEST_KEYS) {
+        const v = picked.fields[k];
+        if (v === null || v === undefined) continue;
+        const cur = f[k];
+        if (cur !== null && cur !== undefined && String(cur).trim() !== "") continue;
+        next[k] = v;
+      }
+      return next as Fields;
+    });
+  };
+
+  /** 빈 칸이면 찾아온 값을 회색 글씨(플레이스홀더)로 미리 보여 준다. */
+  const ph = (k: SuggestKey, fallback: string): string => {
+    const v = picked?.fields[k];
+    return isBlank(k) && v !== null && v !== undefined ? String(v) : fallback;
+  };
+
+  /** 칸 밑에 붙는 적용 단추. 이미 같은 값이면 아무것도 안 띄운다. */
+  const sug = (k: SuggestKey) => {
+    const v = picked?.fields[k];
+    if (v === null || v === undefined) return null;
+    if (String(fields[k] ?? "").trim() === String(v).trim()) return null;
+    return <SuggestRow blank={isBlank(k)} value={String(v)} onApply={() => applyOne(k)} />;
+  };
 
   const submit = async () => {
     if (busy) return;
@@ -230,35 +371,39 @@ export function PaperSheet({
             </div>
           )}
 
-          <Field label="제목" required>
+          <Field label="제목" required suggestion={sug("title")}>
             <input
               ref={titleRef}
               value={fields.title}
               onChange={(e) => set("title", e.target.value)}
-              placeholder="논문 제목"
+              placeholder={ph("title", "논문 제목")}
               className={INPUT}
             />
           </Field>
 
-          <Field label="저자" hint="사람이 읽는 한 줄로 적습니다. 쉼표로 나누면 보기 좋습니다">
+          <Field
+            label="저자"
+            hint="사람이 읽는 한 줄로 적습니다. 쉼표로 나누면 보기 좋습니다"
+            suggestion={sug("authors")}
+          >
             <input
               value={fields.authors ?? ""}
               onChange={(e) => set("authors", e.target.value || null)}
-              placeholder="Vaswani, Shazeer, Parmar…"
+              placeholder={ph("authors", "Vaswani, Shazeer, Parmar…")}
               className={INPUT}
             />
           </Field>
 
           <div className="grid grid-cols-[1fr_110px] gap-3">
-            <Field label="학회 · 저널">
+            <Field label="학회 · 저널" suggestion={sug("venue")}>
               <input
                 value={fields.venue ?? ""}
                 onChange={(e) => set("venue", e.target.value || null)}
-                placeholder="NeurIPS"
+                placeholder={ph("venue", "NeurIPS")}
                 className={INPUT}
               />
             </Field>
-            <Field label="연도">
+            <Field label="연도" suggestion={sug("year")}>
               <input
                 value={fields.year ?? ""}
                 inputMode="numeric"
@@ -268,29 +413,135 @@ export function PaperSheet({
                   const raw = e.target.value.replace(/[^0-9]/g, "").slice(0, 4);
                   set("year", raw ? Number(raw) : null);
                 }}
-                placeholder="2017"
+                placeholder={ph("year", "2017")}
                 className={INPUT}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="DOI">
+            <Field label="DOI" suggestion={sug("doi")}>
               <input
                 value={fields.doi ?? ""}
                 onChange={(e) => set("doi", e.target.value.trim() || null)}
-                placeholder="10.1145/3292500"
+                placeholder={ph("doi", "10.1145/3292500")}
                 className={INPUT}
               />
             </Field>
-            <Field label="arXiv">
+            <Field label="arXiv" suggestion={sug("arxivId")}>
               <input
                 value={fields.arxivId ?? ""}
                 onChange={(e) => set("arxivId", e.target.value.trim() || null)}
-                placeholder="1706.03762"
+                placeholder={ph("arxivId", "1706.03762")}
                 className={INPUT}
               />
             </Field>
+          </div>
+
+          {/*
+            찾아오기.
+            DOI·arXiv 칸 바로 밑에 둔다 — 그 두 칸이 이 단추의 재료이고,
+            누른 결과가 바로 위 칸들로 흘러 들어가는 것이 눈에 보여야 한다.
+          */}
+          <div className="flex flex-col gap-2.5 rounded-lg bg-(--color-bg-2) px-3 py-3 ring-1 ring-(--color-border-soft)">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void runLookup()}
+                disabled={lookupBusy || !canLookup}
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-surface-hi) px-3 py-1.5 text-xs font-medium text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface) disabled:opacity-40"
+              >
+                {lookupBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Search className="h-3.5 w-3.5" />
+                )}
+                찾아오기
+              </button>
+              <p className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                DOI → arXiv → 제목 차례로 바깥에서 찾습니다.
+              </p>
+              {picked && (
+                <button
+                  type="button"
+                  onClick={applyAll}
+                  className="flex shrink-0 items-center gap-1 rounded-full bg-(--color-accent)/15 px-2.5 py-1 text-[11px] font-medium text-(--color-accent) transition hover:bg-(--color-accent)/25"
+                >
+                  <Check className="h-3 w-3" />
+                  전부 적용
+                </button>
+              )}
+            </div>
+
+            {/*
+              후보가 여럿일 때는 **우리가 고르지 않는다.**
+              제목 검색은 1등이 맞다는 보장이 없고, 틀린 것을 조용히 채워 넣으면
+              사람은 그게 자기가 적은 값인 줄 안다.
+            */}
+            {report && report.candidates.length > 1 && (
+              <div className="flex flex-col gap-1.5">
+                <div className="text-[10.5px] text-(--color-fg-4)">
+                  후보 {report.candidates.length}개 — 맞는 것을 고르세요
+                </div>
+                {report.candidates.map((c, i) => (
+                  <button
+                    key={`${c.fields.doi ?? c.fields.title ?? i}`}
+                    type="button"
+                    onClick={() => setPicked(c)}
+                    aria-pressed={picked === c}
+                    className={cn(
+                      "flex flex-col gap-0.5 rounded-md px-2.5 py-2 text-left ring-1 transition",
+                      picked === c
+                        ? "bg-(--color-accent)/10 ring-(--color-accent)/50"
+                        : "bg-(--color-surface) ring-(--color-border-soft) hover:bg-(--color-surface-hi)",
+                    )}
+                  >
+                    <span className="line-clamp-2 text-[11.5px] leading-snug text-(--color-fg-2)">
+                      {c.fields.title ?? "제목 없음"}
+                    </span>
+                    <span className="truncate text-[10.5px] text-(--color-fg-4)">
+                      {[c.fields.authors, c.fields.venue, c.fields.year]
+                        .filter(Boolean)
+                        .join(" · ") || SOURCE_LABEL[c.source]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {picked && (
+              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                빈 칸에 회색으로 미리 들어가 있습니다. 이미 적어 둔 칸은 그대로 두고,
+                덮으려면 그 칸의 단추를 누르세요. 적용하면 받아 온 <b>원본</b>도 함께
+                저장되어 BibTeX 내보내기가 온전해집니다.
+              </p>
+            )}
+
+            {/*
+              어디서 넘어졌는지 그대로 보여 준다.
+              "찾지 못했습니다" 한 줄이면 DOI 를 잘못 적은 것인지, 저쪽이 느려
+              끊긴 것인지, 등록기관이 CSL 을 안 주는 것인지 알 수가 없다.
+            */}
+            {(report?.steps.length || lookupError) && (
+              <ul className="flex flex-col gap-0.5">
+                {report?.steps.map((s, i) => (
+                  <li
+                    key={`${s.source}-${i}`}
+                    className={cn(
+                      "text-[10.5px] leading-snug break-keep",
+                      s.ok ? "text-(--color-fg-4)" : "text-(--color-warn)",
+                    )}
+                  >
+                    {SOURCE_LABEL[s.source]} · {s.note}
+                  </li>
+                ))}
+                {lookupError && (
+                  <li className="text-[10.5px] leading-snug break-keep text-(--color-danger)">
+                    {lookupError}
+                  </li>
+                )}
+              </ul>
+            )}
           </div>
 
           {dups.length > 0 && (
@@ -315,11 +566,11 @@ export function PaperSheet({
             </div>
           )}
 
-          <Field label="원문 주소">
+          <Field label="원문 주소" suggestion={sug("url")}>
             <input
               value={fields.url ?? ""}
               onChange={(e) => set("url", e.target.value.trim() || null)}
-              placeholder="https://arxiv.org/abs/1706.03762"
+              placeholder={ph("url", "https://arxiv.org/abs/1706.03762")}
               className={INPUT}
             />
           </Field>
@@ -333,12 +584,12 @@ export function PaperSheet({
             />
           </Field>
 
-          <Field label="초록">
+          <Field label="초록" suggestion={sug("abstract")}>
             <textarea
               value={fields.abstract ?? ""}
               onChange={(e) => set("abstract", e.target.value || null)}
               rows={5}
-              placeholder="붙여 넣어 두면 나중에 찾기 쉽습니다"
+              placeholder={ph("abstract", "붙여 넣어 두면 나중에 찾기 쉽습니다")}
               className={cn(INPUT, "scrollbar-thin resize-y leading-relaxed")}
             />
           </Field>
@@ -412,26 +663,83 @@ export function PaperSheet({
 const INPUT =
   "w-full rounded-lg bg-(--color-bg-2) px-3 py-2 text-sm text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none placeholder:text-(--color-fg-4) focus:ring-(--color-accent)/60";
 
+/**
+ * 이름표와 칸 한 벌.
+ *
+ * 바깥이 `<label>` 이 아니라 `<div>` 인 것은 제안 단추 때문이다. `<label>` 안의
+ * 단추를 누르면 브라우저가 딸린 칸까지 함께 눌러(포커스) 버려서, "적용" 을 눌렀는데
+ * 커서가 엉뚱한 칸으로 뛰는 일이 생긴다. 그래서 이름표와 칸만 `<label>` 로 묶고
+ * 제안 줄은 그 바깥에 둔다.
+ */
 function Field({
   label,
   hint,
   required,
+  suggestion,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
+  /** 찾아온 값을 이 칸에 넣는 줄. 제안이 없으면 null. */
+  suggestion?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium tracking-wider text-(--color-fg-4) uppercase">
-        {label}
-        {required && <span className="ml-1 text-(--color-accent)">*</span>}
-      </span>
-      {children}
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-medium tracking-wider text-(--color-fg-4) uppercase">
+          {label}
+          {required && <span className="ml-1 text-(--color-accent)">*</span>}
+        </span>
+        {children}
+      </label>
       {hint && <span className="text-[10.5px] break-keep text-(--color-fg-4)">{hint}</span>}
-    </label>
+      {suggestion}
+    </div>
+  );
+}
+
+/**
+ * 찾아온 값을 이 칸에 넣는 줄.
+ *
+ * 빈 칸이면 값이 이미 회색 글씨로 칸 안에 보이므로 단추만 있으면 된다.
+ * **사람이 적어 둔 칸은 다르다** — 무엇으로 바뀌는지 보여 주고, 단추 이름도
+ * "덮어쓰기" 로 말한다. 적어 둔 것이 소리 없이 사라지는 것이 가장 나쁘다.
+ */
+function SuggestRow({
+  blank,
+  value,
+  onApply,
+}: {
+  blank: boolean;
+  value: string;
+  onApply: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <p className="min-w-0 flex-1 text-[10.5px] leading-snug text-(--color-fg-4)">
+        {blank ? (
+          <span>찾아온 값이 회색으로 들어 있습니다</span>
+        ) : (
+          <span className="line-clamp-2 break-all">
+            찾아온 값: <span className="text-(--color-fg-3)">{value}</span>
+          </span>
+        )}
+      </p>
+      <button
+        type="button"
+        onClick={onApply}
+        className={cn(
+          "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium transition",
+          blank
+            ? "bg-(--color-accent)/15 text-(--color-accent) hover:bg-(--color-accent)/25"
+            : "bg-(--color-warn)/15 text-(--color-warn) hover:bg-(--color-warn)/25",
+        )}
+      >
+        {blank ? "적용" : "덮어쓰기"}
+      </button>
+    </div>
   );
 }
 

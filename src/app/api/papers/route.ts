@@ -32,6 +32,14 @@ const createSchema = z.object({
   abstract: z.string().max(20000).nullable().optional(),
   tags: z.string().max(1000).nullable().optional(),
   url: z.string().max(2000).nullable().optional(),
+  /**
+   * 받아 온 서지정보 원본 (CSL-JSON 문자열).
+   *
+   * **여기 없으면 zod 가 조용히 버린다.** `z.object` 는 모르는 칸을 오류로
+   * 만들지 않고 그냥 떼어 내므로, 시트가 잘 보내도 서버까지 닿지 않는다.
+   * 초록보다 넉넉히 잡는다 — 참고문헌을 걷어냈어도 저자 수십 명짜리가 있다.
+   */
+  csl: z.string().max(100000).nullable().optional(),
 });
 
 export async function POST(req: Request) {

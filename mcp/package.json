@@ -1,0 +1,24 @@
+{
+  "name": "paperbento-mcp",
+  "version": "0.1.0",
+  "description": "PaperBento 서재를 읽고 정리하는 MCP 서버 (stdio)",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "paperbento-mcp": "dist/index.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -42,6 +42,7 @@ import { PdfFrame } from "./pdf-frame";
 import type { PdfViewHandle } from "./pdf-view";
 import { RichText } from "./rich-text";
 import { SplitPane } from "./split-pane";
+import { SummaryRun } from "./summary-run";
 
 /**
  * 논문 상세. 원문과 글을 나란히 놓고, 원문 위에 메모를 단다.
@@ -432,17 +433,35 @@ export function PaperDetail({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setDraft(summary?.body ?? "");
-                  setEditing((v) => !v);
-                }}
-                className="flex items-center gap-1.5 rounded-full bg-(--color-bg-2) px-3 py-1.5 text-[11px] text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-hi)"
-              >
-                {editing ? <Eye className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                {editing ? "보기" : "고치기"}
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/*
+                  에이전트에게 요약을 맡기는 자리.
+
+                  "고치기" 옆에 둔다 — 둘 다 요약 본문을 바꾸는 일이고, 사람이
+                  고를 것은 "내가 쓴다" 와 "맡긴다" 둘 중 하나다. 완성되면
+                  `onDone` 이 그 자리에 끼워 넣는다. 목록의 표식(`hasSummary`)도
+                  함께 고쳐야 서재로 돌아갔을 때 "저장이 안 됐나" 가 안 생긴다.
+                */}
+                <SummaryRun
+                  paperId={paper.id}
+                  summary={summary}
+                  onDone={(s) => {
+                    setSummary(s);
+                    setPaper((p) => ({ ...p, hasSummary: !!s?.body.trim() }));
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(summary?.body ?? "");
+                    setEditing((v) => !v);
+                  }}
+                  className="flex items-center gap-1.5 rounded-full bg-(--color-bg-2) px-3 py-1.5 text-[11px] text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-hi)"
+                >
+                  {editing ? <Eye className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                  {editing ? "보기" : "고치기"}
+                </button>
+              </div>
             </header>
 
             {/*

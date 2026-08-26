@@ -48,6 +48,14 @@ export interface PaperDTO {
   hasSummary: boolean;
   /** 붙어 있는 메모 수. */
   noteCount: number;
+  /**
+   * 받아 온 CSL-JSON 원본이 붙어 있는가.
+   *
+   * 본문은 안 싣는다 — 한 편에 1~2KB 라 수백 편이 오는 목록에 실으면 그것만
+   * 으로 무거워진다. 화면은 "내보내기가 온전할 것인가" 만 알면 되고, 그건
+   * 있는지 여부로 충분하다.
+   */
+  hasCsl: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -130,6 +138,41 @@ export interface NoteDTO {
   color: ItemColor | null;
   createdAt: number;
   updatedAt: number;
+}
+
+// ─────────────────────────────────────────────────────────────
+//   서지정보 찾아오기 · 내보내기
+// ─────────────────────────────────────────────────────────────
+
+/*
+ * 모양은 `lookup.ts` 와 `csl.ts` 가 정의하고 여기서는 이름만 다시 내보낸다.
+ *
+ * 두 벌로 적으면 한쪽에 칸을 더할 때 다른 쪽이 조용히 옛 모양으로 남는다 —
+ * JSON 은 그대로 흐르므로 컴파일러가 못 잡는다 (휴지통 DTO 에서 겪었다).
+ * 화면 코드는 늘 `types.ts` 만 보면 되도록 여기에 창구를 둔다.
+ */
+export type {
+  LookupQuery,
+  LookupReport,
+  LookupResult,
+  LookupSource,
+  LookupStep,
+} from "./lookup";
+
+export type { BibFields, CSLItem, CSLName, ExportFormat } from "./csl";
+export { EXPORT_EXT, EXPORT_FORMATS } from "./csl";
+
+/** 내보내기 주소. 논문 하나·서가 하나·서재 전체 어느 쪽이든 이 한 곳이다. */
+export function bibExportUrl(opts: {
+  paperId?: string;
+  groupId?: string;
+  format: import("./csl").ExportFormat;
+}): string {
+  const p = new URLSearchParams();
+  if (opts.paperId) p.set("paper", opts.paperId);
+  if (opts.groupId) p.set("group", opts.groupId);
+  p.set("format", opts.format);
+  return apiPath(`/api/export/bib?${p.toString()}`);
 }
 
 // ─────────────────────────────────────────────────────────────

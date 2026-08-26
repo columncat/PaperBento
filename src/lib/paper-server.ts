@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
+import type { PaperLike } from "./csl";
 import { db, schema } from "./db";
 import type {
   Anchor,
@@ -99,8 +100,37 @@ export function listGroups(): GroupDTO[] {
     .orderBy(asc(schema.groups.position), asc(schema.groups.createdAt))
     .all();
 
+  /*
+   * 쓰는 칸만 읽는다.
+   *
+   * `select()` 로 두면 `headText`(최대 6000자)와 `csl`(1~2KB) 이 매번 딸려
+   * 오는데 **DTO 로는 나가지 않아 그대로 버려진다.** 논문 300편이면 서재 첫
+   * 화면 한 번에 2MB 를 헛되이 읽는 셈이다.
+   *
+   * 있는지 여부만 필요한 것은 여기서 불리언으로 눌러 담는다 — 본문을 끌고
+   * 오지 않으면서 "원본이 있다" 는 표시는 살린다.
+   */
   const paperRows = db
-    .select()
+    .select({
+      id: schema.papers.id,
+      groupId: schema.papers.groupId,
+      fileId: schema.papers.fileId,
+      title: schema.papers.title,
+      authors: schema.papers.authors,
+      venue: schema.papers.venue,
+      year: schema.papers.year,
+      doi: schema.papers.doi,
+      arxivId: schema.papers.arxivId,
+      abstract: schema.papers.abstract,
+      tags: schema.papers.tags,
+      url: schema.papers.url,
+      readState: schema.papers.readState,
+      mark: schema.papers.mark,
+      position: schema.papers.position,
+      hasCsl: sql<number>`(${schema.papers.csl} is not null)`,
+      createdAt: schema.papers.createdAt,
+      updatedAt: schema.papers.updatedAt,
+    })
     .from(schema.papers)
     .orderBy(asc(schema.papers.position), asc(schema.papers.createdAt))
     .all();
@@ -145,6 +175,8 @@ export function listGroups(): GroupDTO[] {
       file: fileDto(p.fileId ? filesById.get(p.fileId) : undefined),
       hasSummary: summaryIds.has(p.id),
       noteCount: noteCounts.get(p.id) ?? 0,
+      // 본문은 싣지 않는다 — 한 편에 1~2KB 라 수백 편이 오면 그것만으로 무거워진다.
+      hasCsl: p.hasCsl === 1,
       createdAt: p.createdAt.getTime(),
       updatedAt: p.updatedAt.getTime(),
     };
@@ -385,6 +417,14 @@ export interface CreatePaperInput {
   abstract?: string | null;
   tags?: string | null;
   url?: string | null;
+  /**
+   * 받아 온 CSL-JSON 원본 (문자열). 찾아오기에서 후보를 적용했을 때만 온다.
+   *
+   * `undefined` 와 `null` 이 다르다 — 안 보내면 손대지 않고, `null` 을 보내면
+   * 붙어 있던 원본을 뗀다. 이 구분이 없으면 시트에서 제목만 고쳐 저장할 때마다
+   * 애써 받아 둔 원본이 조용히 지워진다.
+   */
+  csl?: string | null;
 }
 
 export function createPaper(input: CreatePaperInput): string {
@@ -413,6 +453,7 @@ export function createPaper(input: CreatePaperInput): string {
       abstract: input.abstract ?? null,
       tags: input.tags ?? null,
       url: input.url ?? null,
+      csl: input.csl ?? null,
       position: (pos?.max ?? 0) + 1,
     })
     .run();
@@ -434,7 +475,15 @@ export function updatePaper(id: string, patch: UpdatePaperInput): void {
   db.transaction((tx) => {
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.title !== undefined) set.title = patch.title.trim() || "제목 없음";
-    for (const k of ["authors", "venue", "doi", "arxivId", "abstract", "tags", "url"] as const) {
+    /*
+     * `csl` 이 이 줄에 함께 있는 것이 중요하다.
+     *
+     * 여기 규칙은 "안 보낸 칸은 손대지 않는다" 이다. 시트가 제목만 고쳐
+     * 저장할 때 `csl` 은 아예 안 실려 오고, 그러면 붙어 있던 원본이 그대로
+     * 남는다. 이 줄 밖에서 `set.csl = patch.csl ?? null` 같은 식으로 다루면
+     * 저장을 한 번 누를 때마다 원본이 지워진다.
+     */
+    for (const k of ["authors", "venue", "doi", "arxivId", "abstract", "tags", "url", "csl"] as const) {
       if (patch[k] !== undefined) set[k] = patch[k];
     }
     if (patch.year !== undefined) set.year = patch.year;
@@ -637,6 +686,84 @@ export function updateNote(
 
 export function deleteNote(id: string): void {
   db.delete(schema.paperNotes).where(eq(schema.paperNotes.id, id)).run();
+}
+
+// ─────────────────────────────────────────────────────────────
+//   내보내기 — 서지정보 (BibTeX · RIS · CSL)
+// ─────────────────────────────────────────────────────────────
+
+export interface BibSelection {
+  /** 논문 하나. */
+  paperId?: string | null;
+  /** 서가 하나 — **그 안의 칸에 든 것까지** 함께 간다. */
+  groupId?: string | null;
+}
+
+/**
+ * 내보낼 논문을 모은다.
+ *
+ * 라우트가 SQL 을 쓰지 않게 하려고 여기 둔다. 특히 "서가 하나" 가 그렇다 —
+ * 그룹 두 단이라 자식 그룹까지 훑어야 하는데, 그 규칙이 라우트로 새면
+ * 다음에 내보내기 입구가 하나 더 생길 때 반쪽만 담긴 .bib 이 나온다.
+ *
+ * `headText` 는 뽑지 않는다. 논문 앞부분 수천 자를 내보내기에 끌고 올 이유가
+ * 없고, 서재 전체를 내보내면 그것만으로 수십 MB 가 된다.
+ */
+export function collectForBib(sel: BibSelection): { label: string; papers: PaperLike[] } {
+  const cols = {
+    id: schema.papers.id,
+    title: schema.papers.title,
+    authors: schema.papers.authors,
+    venue: schema.papers.venue,
+    year: schema.papers.year,
+    doi: schema.papers.doi,
+    arxivId: schema.papers.arxivId,
+    abstract: schema.papers.abstract,
+    url: schema.papers.url,
+    csl: schema.papers.csl,
+  };
+
+  if (sel.paperId) {
+    const row = db.select(cols).from(schema.papers).where(eq(schema.papers.id, sel.paperId)).get();
+    if (!row) throw new NotFoundError("논문");
+    return { label: row.title, papers: [row] };
+  }
+
+  if (sel.groupId) {
+    const group = getGroupRow(sel.groupId);
+    if (!group) throw new NotFoundError("그룹");
+    const kids = db
+      .select({ id: schema.groups.id })
+      .from(schema.groups)
+      .where(eq(schema.groups.parentId, sel.groupId))
+      .all()
+      .map((r) => r.id);
+    const papers = db
+      .select(cols)
+      .from(schema.papers)
+      .where(inArray(schema.papers.groupId, [sel.groupId, ...kids]))
+      .orderBy(asc(schema.papers.position), asc(schema.papers.createdAt))
+      .all();
+    return { label: group.name, papers };
+  }
+
+  const papers = db
+    .select(cols)
+    .from(schema.papers)
+    .orderBy(asc(schema.papers.groupId), asc(schema.papers.position))
+    .all();
+  return { label: "서재 전체", papers };
+}
+
+/** 상세 화면이 "받아 온 원본" 을 펴 볼 때. 목록에는 안 실린다. */
+export function getPaperCsl(paperId: string): string | null {
+  const row = db
+    .select({ csl: schema.papers.csl })
+    .from(schema.papers)
+    .where(eq(schema.papers.id, paperId))
+    .get();
+  if (!row) throw new NotFoundError("논문");
+  return row.csl;
 }
 
 // ─────────────────────────────────────────────────────────────

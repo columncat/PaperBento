@@ -5,6 +5,7 @@ import type {
   AppConfigDTO,
   GroupDTO,
   ItemColor,
+  LookupReport,
   NoteDTO,
   PaperMark,
   ReadState,
@@ -72,6 +73,14 @@ export interface PaperInput {
   mark?: PaperMark | null;
   fileId?: string | null;
   groupId?: string;
+  /**
+   * 받아 온 CSL-JSON 원본 (문자열). 찾아오기에서 후보를 적용했을 때만 싣는다.
+   *
+   * **안 실으면 서버가 손대지 않는다.** 이 구분이 없으면 시트에서 제목만
+   * 고쳐 저장할 때마다 애써 받아 둔 원본이 조용히 지워진다. `null` 을 실으면
+   * 그때는 진짜로 뗀다.
+   */
+  csl?: string | null;
   /** PDF 에서 뽑아 둔 앞부분. 에이전트에게 넘길 재료라 목록으로는 안 내려온다. */
   headText?: string | null;
 }
@@ -164,6 +173,29 @@ export const api = {
       `/api/papers/duplicates?${p.toString()}`,
     );
     return json.papers ?? [];
+  },
+
+  /**
+   * 바깥에서 서지정보를 찾아온다. DOI → arXiv → 제목 순으로 첫 성공에서 멈춘다.
+   *
+   * 세 칸을 **함께** 보내라. 무엇이 쓸모 있는지는 서버가 정한다.
+   *
+   * 후보가 하나도 없어도 오류가 아니다 — `steps` 에 어느 길에서 무엇 때문에
+   * 넘어졌는지 담겨 온다. 화면은 그걸 그대로 보여 줘야 한다. "찾지 못했습니다"
+   * 한 줄로 뭉개면 사람이 다음에 무엇을 할지 알 수 없다.
+   */
+  lookup: async (q: {
+    doi?: string | null;
+    arxiv?: string | null;
+    title?: string | null;
+  }): Promise<LookupReport> => {
+    const p = new URLSearchParams();
+    if (q.doi?.trim()) p.set("doi", q.doi.trim());
+    if (q.arxiv?.trim()) p.set("arxiv", q.arxiv.trim());
+    if (q.title?.trim()) p.set("title", q.title.trim());
+    if ([...p.keys()].length === 0) return { candidates: [], steps: [] };
+    const json = await send<LookupReport>(`/api/lookup?${p.toString()}`);
+    return { candidates: json.candidates ?? [], steps: json.steps ?? [] };
   },
 
   // ── 요약 ────────────────────────────────────────────────
