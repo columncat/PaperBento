@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath } from "@/lib/api-path";
 import { api } from "@/lib/client-api";
 import { readJson } from "@/lib/read-json";
-import type { GroupDTO, SummaryDTO } from "@/lib/types";
+import type { GroupDTO, SummaryDTO, SummaryPreset } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,12 +48,6 @@ import { cn } from "@/lib/utils";
  * 없으면 도는 중인지 죽은 건지 알 수 없고, 사람은 한 번 더 누른다.
  */
 
-/** 프리셋의 첫 줄이 이름이다. `app/api/config/route.ts` 를 보라. */
-function presetName(preset: string): string {
-  const first = preset.split("\n", 1)[0]?.trim();
-  return first || "이름 없는 지시문";
-}
-
 interface RunRow {
   id: string;
   state: "running" | "done" | "failed";
@@ -83,7 +77,7 @@ export function SummaryRun({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [presets, setPresets] = useState<string[] | null>(null);
+  const [presets, setPresets] = useState<SummaryPreset[] | null>(null);
   const [picked, setPicked] = useState(0);
   /** 펼쳐 둔 프리셋. 한 번에 하나만 편다 — 전부 펴면 목록이 아니라 문서가 된다. */
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -172,7 +166,7 @@ export function SummaryRun({
     [paperId, finish],
   );
 
-  const instruction = edited ?? presets?.[picked] ?? "";
+  const instruction = edited ?? presets?.[picked]?.prompt ?? "";
   const needsConfirm = summary?.source === "human" && summary.body.trim().length > 0;
   const canRun = instruction.trim().length > 0 && (!needsConfirm || confirmed) && !running;
 
@@ -285,7 +279,7 @@ export function SummaryRun({
           */}
           <ul className="flex flex-col gap-1">
             {presets.map((preset, i) => (
-              <li key={i}>
+              <li key={preset.id}>
                 <div
                   className={cn(
                     "flex items-center gap-1 rounded-md px-1 transition",
@@ -298,7 +292,7 @@ export function SummaryRun({
                     type="button"
                     onClick={() => setExpanded((v) => (v === i ? null : i))}
                     aria-expanded={expanded === i}
-                    aria-label={`${presetName(preset)} 지시문 ${expanded === i ? "접기" : "펼치기"}`}
+                    aria-label={`${preset.name} 지시문 ${expanded === i ? "접기" : "펼치기"}`}
                     className="shrink-0 rounded p-1 text-(--color-fg-4) transition hover:text-(--color-fg-2)"
                   >
                     <ChevronRight
@@ -322,12 +316,12 @@ export function SummaryRun({
                       i === picked ? "text-(--color-accent-strong)" : "text-(--color-fg-2)",
                     )}
                   >
-                    {presetName(preset)}
+                    {preset.name}
                   </button>
                 </div>
                 {expanded === i && (
                   <p className="mt-1 mb-1 ml-6 rounded-md bg-(--color-surface) p-2.5 text-[11px] leading-relaxed break-keep whitespace-pre-wrap text-(--color-fg-3) ring-1 ring-(--color-border-soft)">
-                    {preset}
+                    {preset.prompt}
                   </p>
                 )}
               </li>
@@ -338,7 +332,7 @@ export function SummaryRun({
           {edited === null ? (
             <button
               type="button"
-              onClick={() => setEdited(presets[picked] ?? "")}
+              onClick={() => setEdited(presets[picked]?.prompt ?? "")}
               disabled={running || presets.length === 0}
               className="mt-2 flex items-center gap-1.5 text-[11px] text-(--color-fg-4) transition hover:text-(--color-fg-2) disabled:opacity-40"
             >

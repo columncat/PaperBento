@@ -467,6 +467,17 @@ export function PaperDetail({
                   />
                   <span className="truncate">{bibOpen ? "서지 정보 접기" : "서지 정보 펼치기"}</span>
                 </button>
+                {/* 펼쳤을 때만. 접혀 있으면 무엇을 고치는지가 화면에 없다. */}
+                {bibOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setSheet({ mode: "edit", groupId: paper.groupId, paper })}
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-[11px] text-(--color-accent-strong) ring-1 ring-(--color-accent)/40 transition hover:bg-(--color-accent)/25"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    고치기
+                  </button>
+                )}
               </div>
 
               <div className="flex shrink-0 items-center gap-1.5">
@@ -509,22 +520,22 @@ export function PaperDetail({
             {bibOpen && (
               <div className="mb-4 border-b border-(--color-border-soft) pb-4">
                 <p className="mb-1 text-[11px] text-(--color-fg-4)">{groupName}</p>
-                <div className="flex items-start justify-between gap-3">
-                  <h1
-                    className="min-w-0 text-lg leading-snug break-keep text-(--color-fg)"
-                    style={{ fontFamily: "var(--font-serif)" }}
-                  >
-                    {paper.title}
-                  </h1>
-                  <button
-                    type="button"
-                    onClick={() => setSheet({ mode: "edit", groupId: paper.groupId, paper })}
-                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2.5 py-1 text-[11px] text-(--color-accent-strong) ring-1 ring-(--color-accent)/40 transition hover:bg-(--color-accent)/25"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    고치기
-                  </button>
-                </div>
+                {/*
+                  제목이 한 줄을 통째로 쓴다.
+                  예전에는 "고치기" 단추와 한 줄을 나눠 썼는데, 이 칸이 440px
+                  남짓이라 제목이 조금만 길어도 둘이 겹쳐 보였다. 단추는 위
+                  머리말로 올렸다 — 거기서는 다툴 것이 없다.
+
+                  `[overflow-wrap:anywhere]` 를 함께 준다. `break-keep` 은 한국어를
+                  아무 데서나 자르지 말라는 뜻이라, 띄어쓰기 없는 긴 영문 제목
+                  (DOI 나 화학식이 든 것)은 그대로 칸을 넘어간다.
+                */}
+                <h1
+                  className="text-lg leading-snug break-keep text-(--color-fg) [overflow-wrap:anywhere]"
+                  style={{ fontFamily: "var(--font-serif)" }}
+                >
+                  {paper.title}
+                </h1>
                 {cite && <p className="mt-1 text-xs text-(--color-fg-3)">{cite}</p>}
 
                 <dl className="mt-3 flex flex-col gap-2 text-xs">

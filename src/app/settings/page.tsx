@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ExportMenu } from "@/components/export-menu";
 import { PreferencesPanel } from "@/components/preferences-panel";
 import { SettingsExport } from "@/components/settings-export";
+import { PresetsPanel } from "./presets-panel";
 import { apiPath } from "@/lib/api-path";
 import { isAuthEnabled } from "@/lib/auth";
 import { listGroups } from "@/lib/paper-server";
@@ -101,6 +102,19 @@ export default async function SettingsPage() {
 
       {/* 표시 설정 */}
       <PreferencesPanel />
+
+      {/*
+        에이전트 지시문 — 요약 프리셋과 서지정보 지시문.
+
+        표시 설정 바로 아래다. 위의 셋(저장 현황·표시 설정)은 "이 앱이 지금 어떤
+        모습인가" 고, 아래 셋(백업·내보내기·기록)은 "파일로 꺼내고 되짚기" 다.
+        지시문은 앞쪽에 붙는다 — 매일 쓰는 화면의 동작을 바꾸는 것이지, 꺼내
+        보는 것이 아니다.
+
+        두 카드가 한 번에 걸린다. 하나는 여러 개 중에 고르는 것이고 하나는
+        하나뿐인 것이라 카드가 갈라져 있다 — 자세한 것은 presets-panel.tsx.
+      */}
+      <PresetsPanel />
 
       {/* 백업 */}
       <SettingsExport />

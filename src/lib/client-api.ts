@@ -89,7 +89,66 @@ export interface PaperInput {
  * 모양은 `types.ts` 가 들고 있다. 여기서 다시 적으면 서버 쪽 정의와 갈라진다.
  * 부르는 쪽이 `client-api` 에서 함께 꺼내 쓰던 것이 있어 이름은 그대로 내보낸다.
  */
-export type { AppConfigDTO, TrashEntryDTO } from "./types";
+export type { AppConfigDTO, SummaryPreset, TrashEntryDTO } from "./types";
+
+// ─────────────────────────────────────────────────────────────
+//   에이전트 서지정보 제안
+// ─────────────────────────────────────────────────────────────
+
+/*
+ * 이 모양들은 `lib/suggest.ts` 가 서버에서 들고 있는 것과 짝이다.
+ *
+ * `types.ts` 를 거치지 않고 여기 적는 것은 `suggest.ts` 가 better-sqlite3 와
+ * `node:fs` 를 끌고 오는 서버 전용 모듈이기 때문이다 — 브라우저 번들이 타입
+ * 하나 때문에 그 파일을 쳐다보게 두면 안 된다.
+ */
+
+/**
+ * 에이전트가 짐작한 값.
+ *
+ * **찾아온 값과 한 자루에 담지 마라.** 등록기관이 준 것은 정확한 것이고 이건
+ * 추측이다. 화면이 둘을 갈라 보여 주고 적용 순서도 다르게 매기는데, 여기서
+ * 하나로 합쳐 두면 그 구분이 타입에서 사라진다.
+ */
+export interface BiblioGuess {
+  title?: string;
+  authors?: string;
+  venue?: string;
+  year?: number;
+  doi?: string;
+  arxivId?: string;
+  abstract?: string;
+  /** 단서와 논문이 어긋난 자리 한 문장. 논문 칸이 아니라 사람에게 하는 말이다. */
+  mismatch?: string;
+}
+
+/** 찾아오기가 먼저 받아 온 것. 에이전트에게 단서로 함께 넘긴다. */
+export interface BiblioClue {
+  source?: "doi" | "arxiv" | "crossref";
+  title?: string | null;
+  authors?: string | null;
+  venue?: string | null;
+  year?: number | null;
+  doi?: string | null;
+  arxivId?: string | null;
+  abstract?: string | null;
+  url?: string | null;
+}
+
+export interface BiblioSuggestionDTO {
+  id: string;
+  state: "running" | "done" | "failed";
+  /** `done` 일 때만 채워진다. 서버의 허용목록을 지난 값이다. */
+  fields: BiblioGuess | null;
+  error: string | null;
+  applied: boolean;
+}
+
+export interface BiblioAgentState {
+  suggestion: BiblioSuggestionDTO | null;
+  /** 부를 수 있는가. 못 부르면 화면은 토글을 아예 안 켠다. */
+  agent: { ready: boolean; reason: string | null };
+}
 
 export const api = {
   list: () => mutate("/api/groups", { method: "GET" }),
@@ -198,6 +257,56 @@ export const api = {
     return { candidates: json.candidates ?? [], steps: json.steps ?? [] };
   },
 
+  // ── 서지정보 제안 ───────────────────────────────────────
+  /**
+   * 에이전트에게 빈 칸을 맡긴다. **찾아오기가 먼저 돈 뒤에 부른다.**
+   *
+   * `start` 에 넘기는 `clue` 는 방금 `lookup` 이 받아 온 값이다. 등록기관이
+   * 준 것은 정확한 것이고 모델이 PDF 를 읽어 내놓는 것은 추측이라, 정확한
+   * 것을 먼저 쥐여 주지 않으면 같은 칸에 두 값이 앉고 어느 쪽이 맞는지
+   * 사람이 가려야 한다. 순서를 뒤집지 마라.
+   *
+   * 여기서도 **논문은 바뀌지 않는다.** 제안은 `paper_suggestions` 에 앉고,
+   * 논문이 바뀌는 것은 사람이 확인한 값을 싣는 `updatePaper` 뿐이다.
+   */
+  biblio: {
+    /**
+     * 지금 상태. `suggestionId` 를 주면 그 제안을, 안 주면 가장 최근 것을 본다.
+     *
+     * **이 요청이 서버 쪽 진행을 민다.** 순수한 읽기가 아닌 것은 알고 쓴다.
+     * 부를 수 있는지(`agent`)도 함께 온다 — 시트가 열릴 때 한 번으로
+     * "토글을 켜도 되는가" 와 "받아 둔 제안이 있는가" 를 같이 알아야 한다.
+     */
+    status: (paperId: string, suggestionId?: string): Promise<BiblioAgentState> =>
+      send<BiblioAgentState>(
+        `/api/papers/${q(paperId)}/suggest${suggestionId ? `?id=${q(suggestionId)}` : ""}`,
+      ),
+
+    /** 시작만 시키고 번호를 받는다. 끝은 `status` 로 물어본다. */
+    start: async (
+      paperId: string,
+      clue?: BiblioClue | null,
+    ): Promise<BiblioSuggestionDTO | null> => {
+      const json = await send<{ suggestion: BiblioSuggestionDTO | null }>(
+        `/api/papers/${q(paperId)}/suggest`,
+        jsonInit("POST", { kind: "biblio", clue: clue ?? null }),
+      );
+      return json.suggestion;
+    },
+
+    /**
+     * "봤고 적용했다" 는 표시. **논문을 바꾸는 요청이 아니다.**
+     *
+     * 저장(`updatePaper`)이 성공한 **뒤에** 부른다. 순서가 그래야 저장이
+     * 실패했는데 "적용됨" 으로 남는 일이 없다.
+     */
+    markApplied: (paperId: string, suggestionId: string): Promise<void> =>
+      send<unknown>(
+        `/api/papers/${q(paperId)}/suggest`,
+        jsonInit("PATCH", { id: suggestionId, applied: true }),
+      ).then(() => undefined),
+  },
+
   // ── 요약 ────────────────────────────────────────────────
   /** 본문은 목록에 안 실린다 — 서재 한 화면에 수백 편이 온다. 여기서 따로 받는다. */
   getSummary: async (paperId: string): Promise<SummaryDTO | null> => {
@@ -280,6 +389,16 @@ export const api = {
     return json.config;
   },
 
+  /**
+   * 고칠 칸만 실어 보낸다. **안 실은 칸은 서버가 손대지 않는다.**
+   *
+   * 설정 화면이 요약 프리셋과 서지정보 지시문을 따로 저장하기 때문에 이 구분이
+   * 필요하다. 한쪽을 저장할 때 전부를 실어 보내면, 다른 쪽에서 아직 적고 있던
+   * 글이 화면에 있던 옛 값으로 덮인다.
+   *
+   * 돌려받는 것은 서버가 세운 뒤의 설정 전체다 — 새로 붙은 프리셋 `id` 처럼
+   * 서버에서 정해지는 것이 있어서, 화면은 이 답으로 갈아 끼워야 한다.
+   */
   saveConfig: async (patch: Partial<AppConfigDTO>): Promise<AppConfigDTO> => {
     const json = await send<{ config: AppConfigDTO }>("/api/config", jsonInit("PUT", patch));
     return json.config;

@@ -421,7 +421,16 @@ export const appConfig = sqliteTable("app_config", {
    * 등록 시트에서 매번 바꿀 수 있고, 이건 그 초깃값일 뿐이다.
    */
   agentSuggestDefault: integer("agent_suggest_default").notNull().default(0),
-  /** 요약 지시문 프리셋의 JSON 배열. */
+  /**
+   * 이름과 달리 **설정 한 덩어리가 들어 있는 JSON 자루**다:
+   * `{ v: 2, presets: SummaryPreset[], biblioPrompt: string }`.
+   *
+   * 예전에는 요약 지시문의 문자열 배열만 들었고, 그 모양으로 저장된 DB 가
+   * 밖에 남아 있어 읽는 쪽이 아직 그 갈래를 탄다. 세우고 눕히는 자리는
+   * `app/api/config/route.ts` 의 `readStored()` / `toPresets()` 한 곳이다 —
+   * 칸을 파지 않은 것은 자루 안을 넓히는 데 마이그레이션 번호가 필요 없기 때문이다.
+   * (`lib/suggest.ts` 의 `configuredGuide()` 도 `biblioPrompt` 를 이 칸에서 직접 읽는다.)
+   */
   summaryPresets: text("summary_presets"),
   updatedAt: stamp("updated_at"),
 });

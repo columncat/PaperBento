@@ -5,10 +5,12 @@ import { logAgent } from "@/lib/agent-log";
 import { getPaperRow } from "@/lib/paper-server";
 import {
   advance,
+  agentReady,
   latestSuggestion,
   markApplied,
   readSuggestion,
   startBiblio,
+  type BiblioClue,
 } from "@/lib/suggest";
 
 /**
@@ -33,13 +35,47 @@ import {
  *
  * **GET 이 진행을 민다.** 순수한 읽기가 아닌 것은 알고 쓴다. 서버 타이머에만
  * 맡기면 프로세스가 다시 뜰 때 진행 중이던 것이 영영 `running` 으로 남는다.
+ *
+ * ## 찾아오기가 먼저다
+ *
+ * POST 는 `clue` 를 함께 받는다 — 화면이 doi.org·arXiv·Crossref 에서 **먼저**
+ * 받아 온 서지정보다. 등록기관이 준 값은 정확한 것이고 모델이 PDF 를 읽어
+ * 내놓는 것은 추측이라, 순서를 뒤집으면 같은 칸에 두 값이 앉고 어느 쪽이
+ * 맞는지 사람이 가려야 한다. 단서를 함께 넘겨 **남은 빈 칸만** 메우게 한다.
+ *
+ * 찾아오기를 여기서 돌지 않는 이유는 제목 검색이 후보를 여럿 내놓기 때문이다.
+ * 무엇을 단서로 삼을지는 사람이 화면에서 보고 정한 것이어야 한다.
  */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * 찾아오기가 먼저 받아 온 값 — 에이전트에게 함께 넘길 **단서**.
+ *
+ * 화면이 실어 보내는 것이라 그대로 믿지 않는다. **여기가 허용목록의 자리다** —
+ * 아는 칸만 취하고(zod 는 모르는 키를 말없이 버린다) 길이도 여기서 자른다.
+ * 이 덩어리는 결국 프롬프트에 실리므로, 아무 모양이나 통과시키면 브라우저에서
+ * 프롬프트를 쓸 수 있게 된다. 값이 다 널이면 단서가 없는 것으로 친다.
+ *
+ * CSL 원본을 통째로 받지 않는 것도 같은 이유다. 우리가 프롬프트에 넣고 싶은
+ * 것은 여덟 칸뿐이고, 그 이상을 받으면 그 이상이 언젠가 프롬프트로 흘러간다.
+ */
+const clueSchema = z.object({
+  source: z.enum(["doi", "arxiv", "crossref"]).optional(),
+  title: z.string().max(500).nullish(),
+  authors: z.string().max(1000).nullish(),
+  venue: z.string().max(300).nullish(),
+  year: z.number().int().min(1000).max(3000).nullish(),
+  doi: z.string().max(200).nullish(),
+  arxivId: z.string().max(60).nullish(),
+  abstract: z.string().max(4000).nullish(),
+  url: z.string().max(500).nullish(),
+});
+
 const postSchema = z.object({
   kind: z.literal("biblio").default("biblio"),
+  clue: clueSchema.nullish(),
 });
 
 const patchSchema = z.object({
@@ -60,8 +96,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 
-  const suggestion = await startBiblio(id);
-  logAgent(req, "서지정보 제안 요청", paper.title, { suggestionId: suggestion.id });
+  /*
+   * 부를 수 없으면 **줄을 만들지 않고** 여기서 돌아선다.
+   *
+   * `startBiblio` 에 맡겨도 실패로 끝나기는 한다. 다만 그때는 실패한 제안
+   * 행이 하나 남고, 그게 이 논문의 "가장 최근 제안" 이 되어 다음에 시트를 열
+   * 때마다 옛 실패가 먼저 보인다. 설정이 안 된 것은 이 논문의 문제가 아니다.
+   */
+  const ready = agentReady();
+  if (!ready.ready) {
+    return NextResponse.json({ error: ready.reason, agent: ready }, { status: 503 });
+  }
+
+  const clue = (parsed.data.clue ?? null) as BiblioClue | null;
+  const suggestion = await startBiblio(id, clue);
+  logAgent(req, "서지정보 제안 요청", paper.title, {
+    suggestionId: suggestion.id,
+    // 무엇을 단서로 줬는지 남긴다. 값 자체가 아니라 출처만 — 기록은 되짚는
+    // 자리이지 서지정보를 한 벌 더 두는 자리가 아니다.
+    clue: clue ? (clue.source ?? "lookup") : null,
+  });
 
   /*
    * 시작 자리에서 이미 실패했으면 그대로 알린다 (스캔본이라 글자가 없거나,
@@ -77,15 +131,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "논문을 찾을 수 없습니다" }, { status: 404 });
   }
 
+  /*
+   * 부를 수 있는지도 함께 내려보낸다.
+   *
+   * 시트는 열릴 때 이 한 번의 요청으로 **토글을 켤지**와 **이미 받아 둔 제안이
+   * 있는지**를 같이 안다. 못 부르는데 켜 두고 누를 때 실패하는 것은 없느니만
+   * 못하다 — 사람은 PDF 를 의심하고, 진짜 이유(환경변수)는 화면 어디에도
+   * 안 나온다.
+   */
+  const agent = agentReady();
+
   const wanted = new URL(req.url).searchParams.get("id");
   const row = wanted ? readSuggestion(wanted) : latestSuggestion(id, "biblio");
-  if (!row) return NextResponse.json({ suggestion: null });
+  if (!row) return NextResponse.json({ suggestion: null, agent });
   // 남의 논문 제안을 번호만 알면 읽을 수 있게 두지 않는다.
-  if (row.paperId !== id) return NextResponse.json({ suggestion: null });
+  if (row.paperId !== id) return NextResponse.json({ suggestion: null, agent });
 
   // 아직 도는 중이면 한 걸음 민다. 이 요청이 진행의 주된 힘이다.
   const fresh = row.state === "running" ? ((await advance(row.id)) ?? row) : row;
-  return NextResponse.json({ suggestion: fresh });
+  return NextResponse.json({ suggestion: fresh, agent });
 }
 
 /**
