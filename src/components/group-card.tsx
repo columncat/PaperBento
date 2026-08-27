@@ -42,6 +42,7 @@ import {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { ExportSection } from "./export-menu";
 import type { PaperRowActions } from "./paper-row";
 import { SortablePaperRow } from "./sortable-paper-row";
 import { UploadButton, UploadDrop } from "./upload-drop";
@@ -172,7 +173,7 @@ function Menu({
       {open && (
         <div
           role="menu"
-          className="absolute top-8 right-0 z-50 w-44 overflow-hidden rounded-xl bg-(--color-surface) py-1 shadow-xl ring-1 ring-(--color-border)"
+          className="absolute top-8 right-0 z-50 w-52 overflow-hidden rounded-xl bg-(--color-surface) py-1 shadow-xl ring-1 ring-(--color-border)"
         >
           {children(() => setOpen(false))}
         </div>
@@ -474,15 +475,22 @@ function SubGroupSection({
                     handlers.promote(sub.id);
                   }}
                 />
-                <MenuItem
-                  Icon={Trash2}
-                  label="휴지통으로"
-                  danger
-                  onClick={() => {
-                    close();
-                    handlers.remove(sub.id);
-                  }}
+                <ExportSection
+                  target={{ groupId: sub.id }}
+                  title="서지정보 내보내기"
+                  onPick={close}
                 />
+                <div className="mt-1 border-t border-(--color-border-soft) pt-1">
+                  <MenuItem
+                    Icon={Trash2}
+                    label="휴지통으로"
+                    danger
+                    onClick={() => {
+                      close();
+                      handlers.remove(sub.id);
+                    }}
+                  />
+                </div>
               </>
             )}
           </Menu>
@@ -658,17 +666,35 @@ export function GroupCard({
                     handlers.setColor(group.id, c);
                   }}
                 />
-                <MenuItem
-                  Icon={Trash2}
-                  label="휴지통으로"
-                  danger
-                  disabled={locked}
-                  hint={locked ? "시스템 서가는 지울 수 없습니다" : undefined}
-                  onClick={() => {
-                    close();
-                    handlers.remove(group.id);
-                  }}
+                {/*
+                  이 서가에 든 논문 전부. 라우트의 `?group=` 은 서가에 바로 놓인
+                  것과 안의 칸에 든 것을 함께 담으므로, 카드에서 보이는 수(`total`)와
+                  나가는 편수가 어긋나지 않는다.
+
+                  비어 있어도 막지 않는다 — 빈 .bib 한 장이 떨어질 뿐이고, 접힌
+                  칸까지 세어 가며 단추를 흐리게 하는 쪽이 더 헷갈린다.
+                */}
+                <ExportSection
+                  target={{ groupId: group.id }}
+                  title="서지정보 내보내기"
+                  hint={
+                    group.children.length > 0 ? "안의 칸에 든 논문까지 함께" : undefined
+                  }
+                  onPick={close}
                 />
+                <div className="mt-1 border-t border-(--color-border-soft) pt-1">
+                  <MenuItem
+                    Icon={Trash2}
+                    label="휴지통으로"
+                    danger
+                    disabled={locked}
+                    hint={locked ? "시스템 서가는 지울 수 없습니다" : undefined}
+                    onClick={() => {
+                      close();
+                      handlers.remove(group.id);
+                    }}
+                  />
+                </div>
               </>
             )}
           </Menu>

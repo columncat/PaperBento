@@ -34,6 +34,7 @@ import {
 } from "@/lib/types";
 import { cn, formatDateTime } from "@/lib/utils";
 
+import { ExportMenu } from "./export-menu";
 import { NoteEditor, type NoteEditorTarget } from "./note-editor";
 import { NoteList } from "./note-list";
 import { MarkPicker, ReadStateButton } from "./paper-mark";
@@ -93,6 +94,21 @@ const SPLIT_KEY = "paperbento.paperSplit";
 const PdfView = dynamic(() => import("./pdf-view").then((m) => m.PdfView), {
   ssr: false,
   loading: () => <PdfSkeleton />,
+});
+
+/**
+ * 인용문 상자도 뷰어와 같은 이유로 따로 받아 온다.
+ *
+ * 상자 자체는 작지만 그 뒤에 citeproc-js 가 있고 그것만 967KB 다 (`cite.ts`).
+ * 서지정보를 펴야 비로소 화면에 들어오므로, 안 펴는 사람은 그 무게를 지지
+ * 않는다. `ssr: false` 인 것은 고른 스타일을 localStorage 에서 읽기 때문이다 —
+ * 서버는 그 값을 알 수 없어 미리 그려 봐야 어긋난 것만 그린다.
+ */
+const CiteCopy = dynamic(() => import("./cite-copy").then((m) => m.CiteCopy), {
+  ssr: false,
+  loading: () => (
+    <div className="mt-3 h-24 animate-pulse rounded-lg bg-(--color-bg-2) ring-1 ring-(--color-border-soft)" />
+  ),
 });
 
 export function PaperDetail({
@@ -331,6 +347,26 @@ export function PaperDetail({
             </button>
           )}
 
+          {/*
+            서지정보 내보내기.
+
+            바로 옆 "내려받기" 는 PDF 원본이다. 둘 다 파일이 떨어지는 단추라
+            같은 이름을 붙이면 .bib 을 기다리는 사람이 PDF 를 받는다. 이름을
+            "서지정보" 로 가르고 아이콘도 인용부호로 달리 준다.
+
+            `hasCsl` 로 막지 않는다 — 원본이 없어도 라우트가 우리 칸으로
+            최소한을 만들어 준다. 인용 목록에서 한 편이 소리 없이 빠지는 것이
+            가장 나쁘다. 그래서 여기서는 "원본이 있느냐" 를 알려만 준다.
+          */}
+          <ExportMenu
+            target={{ paperId: paper.id }}
+            label="서지정보"
+            hint={
+              paper.hasCsl
+                ? "받아 온 원본 서지정보가 있어 저자·권·쪽까지 온전히 나갑니다."
+                : "원본 서지정보가 없어 적어 둔 칸으로 만듭니다. 서지정보 찾기를 한 번 돌리면 더 온전해집니다."
+            }
+          />
         </div>
       </header>
 
@@ -510,6 +546,13 @@ export function PaperDetail({
                     />
                   )}
                 </dl>
+
+                {/*
+                  인용문. DOI·arXiv 바로 아래에 둔다 — 셋 다 "이 논문을 남에게
+                  가리키는 법" 이라 한자리에 모인다. 초록 뒤에 두면 초록이 긴
+                  논문에서 화면 밖으로 밀려 나가 있는 줄도 모르게 된다.
+                */}
+                <CiteCopy paperId={paper.id} hasCsl={paper.hasCsl} />
 
                 {tags.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">

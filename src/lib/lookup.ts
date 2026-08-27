@@ -15,8 +15,9 @@
  *    필요한 것이 열 칸 남짓이고, 그것 때문에 의존성을 하나 더 지는 것은 손해다.
  *    arXiv 응답에 DOI 가 있으면 1번으로 되돌아간다 — 출판본이 프리프린트보다
  *    정확하고, 사람이 인용하고 싶은 것도 그쪽이다.
- * 3. **제목** — Crossref 검색. 여러 후보가 나오고 1등이 맞다는 보장이 없다.
- *    그래서 **하나를 고르지 않는다.** 목록을 그대로 올려 보내고 사람이 고른다.
+ * 3. **제목** — Crossref 와 arXiv 를 **함께** 뒤진다. 여러 후보가 나오고 1등이
+ *    맞다는 보장이 없다. 그래서 **하나를 고르지 않는다.** 목록을 그대로 올려
+ *    보내고 사람이 고른다. 두 곳을 다 보는 이유는 `lookupByTitle` 에 적었다.
  *
  * 실패를 조용히 넘기지 않는다. 어느 길에서 무엇 때문에 넘어졌는지 `steps` 에
  * 담아 함께 돌려준다 — 빈 손으로 돌아왔을 때 "안 나옵니다" 만 보이면 사람이
@@ -452,30 +453,44 @@ function splitArxivName(full: string): CSLName {
   return { given: parts.join(" "), family };
 }
 
-export async function lookupByArxiv(rawId: string): Promise<LookupResult[]> {
-  const id = normalizeArxivId(rawId);
-  if (!id) throw new LookupError("arXiv 번호 모양이 아닙니다 (2310.06825 또는 cs/0501001)");
+/**
+ * 명세에 적힌 주소는 `http://` 지만 https 로 부른다. 어차피 같은 곳으로
+ * 넘어가고, 중간에 누가 끼어들 여지를 남길 이유가 없다.
+ */
+function arxivUrl(params: Record<string, string>): string {
+  return `https://export.arxiv.org/api/query?${new URLSearchParams(params).toString()}`;
+}
 
-  /*
-   * 명세에 적힌 주소는 `http://` 지만 https 로 부른다. 어차피 같은 곳으로
-   * 넘어가고, 중간에 누가 끼어들 여지를 남길 이유가 없다.
-   */
-  const xml = await fetchText(
-    `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}&max_results=1`,
-    "application/atom+xml",
-  );
+/** 피드 안의 `<entry>` 속살을 순서대로. */
+function arxivEntries(xml: string): string[] {
+  return [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map((m) => m[1]);
+}
 
-  const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/i.exec(xml)?.[1];
-  if (!entry) throw new LookupError("응답에 항목이 없습니다");
-
-  /*
-   * arXiv 는 없는 번호에도 200 을 주고, 대신 `id` 가 오류 주소인 항목 하나를
-   * 끼워 보낸다. 이걸 안 보면 "Error" 라는 제목의 논문이 서재에 꽂힌다.
-   */
+/**
+ * 오류 항목인지 본다.
+ *
+ * arXiv 는 없는 번호에도, 못 알아먹는 질의에도 **200 을 주고** 대신 `id` 가
+ * 오류 주소인 항목 하나를 끼워 보낸다. 이걸 안 보면 "Error" 라는 제목의
+ * 논문이 서재에 꽂힌다.
+ */
+function arxivErrorNote(entry: string): string | null {
   const entryId = tag(entry, "id") ?? "";
-  if (/\/api\/errors/i.test(entryId)) {
-    throw new LookupError(tag(entry, "summary") ?? "arXiv 가 그 번호를 모릅니다");
-  }
+  if (!/\/api\/errors/i.test(entryId)) return null;
+  return tag(entry, "summary") ?? "arXiv 가 그 번호를 모릅니다";
+}
+
+/**
+ * `<entry>` 하나를 CSL 한 덩어리로.
+ *
+ * 번호로 받은 것과 제목으로 찾은 것이 **똑같은 모양**이라 함께 쓴다. 나눠
+ * 두면 한쪽만 고치는 일이 생긴다.
+ *
+ * 못 만들면 던지지 않고 null 이다. 제목 검색은 다섯 개 중 하나가 이상해도
+ * 나머지를 살려야 하기 때문이다 — 부르는 쪽이 무엇을 할지 정한다.
+ */
+function arxivEntryToCsl(entry: string, askedId?: string): CSLItem | null {
+  const title = tag(entry, "title");
+  if (!title) return null;
 
   /*
    * arXiv 는 늘 **판 번호가 붙은** id 를 돌려준다 — `1706.03762` 로 물어도
@@ -486,11 +501,10 @@ export async function lookupByArxiv(rawId: string): Promise<LookupResult[]> {
    * 다른 번호로 보인다. 인용에서 가리키는 것은 판이 아니라 논문이다.
    * 실제로 받은 판은 `custom.arxivVersion` 에 남겨 둔다.
    */
-  const served = /arxiv\.org\/abs\/(.+)$/i.exec(entryId)?.[1] ?? id;
-  const version = /v(\d+)$/i.exec(served)?.[1] ?? null;
-  const canonical = served.replace(/v\d+$/i, "");
-  const title = tag(entry, "title");
-  if (!title) throw new LookupError("제목을 찾지 못했습니다");
+  const entryId = tag(entry, "id") ?? "";
+  const served = /arxiv\.org\/abs\/(.+)$/i.exec(entryId)?.[1] ?? askedId ?? null;
+  const version = served ? (/v(\d+)$/i.exec(served)?.[1] ?? null) : null;
+  const canonical = served ? served.replace(/v\d+$/i, "") : null;
 
   const authors = [...entry.matchAll(/<author\b[^>]*>([\s\S]*?)<\/author>/gi)]
     .map((m) => tag(m[1], "name"))
@@ -509,7 +523,7 @@ export async function lookupByArxiv(rawId: string): Promise<LookupResult[]> {
     title,
     author: authors.length ? authors : undefined,
     abstract: tag(entry, "summary") ?? undefined,
-    URL: `https://arxiv.org/abs/${canonical}`,
+    URL: canonical ? `https://arxiv.org/abs/${canonical}` : undefined,
     publisher: journalRef ? undefined : "arXiv",
     "container-title": journalRef ?? undefined,
     issued: y ? { "date-parts": [[Number(y[1]), Number(y[2]), Number(y[3])]] } : undefined,
@@ -519,22 +533,47 @@ export async function lookupByArxiv(rawId: string): Promise<LookupResult[]> {
      * 더 많고, 잘못 옮기면 사람이 지워야 한다. 그대로 note 에 남겨 보여만 준다.
      */
     note: comment ?? undefined,
-    custom: {
-      arxivId: canonical,
-      ...(version ? { arxivVersion: version } : {}),
-      ...(primaryClass ? { primaryClass } : {}),
-    },
+    ...(canonical
+      ? {
+          custom: {
+            arxivId: canonical,
+            ...(version ? { arxivVersion: version } : {}),
+            ...(primaryClass ? { primaryClass } : {}),
+          },
+        }
+      : {}),
   };
 
   const doi = normalizeDoi(tag(entry, "arxiv:doi"));
   if (doi) item.DOI = doi;
+
+  return item;
+}
+
+export async function lookupByArxiv(rawId: string): Promise<LookupResult[]> {
+  const id = normalizeArxivId(rawId);
+  if (!id) throw new LookupError("arXiv 번호 모양이 아닙니다 (2310.06825 또는 cs/0501001)");
+
+  const xml = await fetchText(
+    arxivUrl({ id_list: id, max_results: "1" }),
+    "application/atom+xml",
+  );
+
+  const entry = arxivEntries(xml)[0];
+  if (!entry) throw new LookupError("응답에 항목이 없습니다");
+
+  const err = arxivErrorNote(entry);
+  if (err) throw new LookupError(err);
+
+  const item = arxivEntryToCsl(entry, id);
+  if (!item) throw new LookupError("제목을 찾지 못했습니다");
 
   const normalized = normalizeCsl(item);
   return normalized ? [toResult("arxiv", normalized)] : [];
 }
 
 // ─────────────────────────────────────────────────────────────
-//   3. 제목 → Crossref 검색
+//   3. 제목 → Crossref + arXiv 검색
 // ─────────────────────────────────────────────────────────────
 
 const CROSSREF_ROWS = 5;
@@ -563,10 +602,7 @@ function crossrefUrl(title: string, select: boolean): string {
   return `https://api.crossref.org/works?${p.toString()}`;
 }
 
-export async function lookupByTitle(rawTitle: string): Promise<LookupResult[]> {
-  const title = rawTitle.trim().replace(/\s+/g, " ");
-  if (title.length < 4) throw new LookupError("제목이 너무 짧습니다 (네 글자 이상)");
-
+async function searchCrossrefByTitle(title: string): Promise<LookupResult[]> {
   let text: string;
   try {
     text = await fetchText(crossrefUrl(title, true), "application/json");
@@ -588,7 +624,215 @@ export async function lookupByTitle(rawTitle: string): Promise<LookupResult[]> {
     if (item) out.push(toResult("crossref", item, score));
   }
   if (out.length === 0) throw new LookupError("받은 것에서 서지정보를 찾지 못했습니다");
-  return rankCandidates(out);
+  return out;
+}
+
+const ARXIV_ROWS = 5;
+
+/**
+ * 제목으로 arXiv 뒤지기.
+ *
+ * **왜 Crossref 한 곳으로는 모자란가.** NeurIPS·ICLR·ICML 은 논문집에 DOI 를
+ * 안 붙이는 해가 많아 상당수가 Crossref 에 아예 없다. 실제로 "Attention is
+ * all you need" 를 제목으로 물으면 원본은 후보에 끼지도 못하고 제목이 조금씩
+ * 닮은 엉뚱한 논문 다섯 편이 온다. 그런데 그 논문들은 arXiv 에 거의 다 있다.
+ *
+ * `ti:"…"` 는 따옴표 안을 **통째로 한 어구**로 맞춘다. 따옴표를 빼면 낱말이
+ * 흩어져 맞아서 "Deep learning" 같은 제목에 수백 편이 걸린다.
+ *
+ * arXiv 는 초당 요청을 제한한다(권고는 3초에 한 번). 우리는 제목 검색 한 번에
+ * 요청 하나만 보내고, 재시도도 하지 않는다.
+ */
+export async function searchArxivByTitle(title: string): Promise<LookupResult[]> {
+  /*
+   * 따옴표와 역슬래시는 어구를 깨뜨린다 — 우리가 두른 따옴표가 제목 안의
+   * 따옴표에서 먼저 닫혀 버리고, 그러면 arXiv 는 질의를 못 알아먹었다는
+   * 오류 항목을 200 에 실어 보낸다.
+   */
+  const phrase = title.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim();
+  if (phrase.length < 4) throw new LookupError("제목이 너무 짧습니다 (네 글자 이상)");
+
+  const xml = await fetchText(
+    arxivUrl({ search_query: `ti:"${phrase}"`, max_results: String(ARXIV_ROWS) }),
+    "application/atom+xml",
+  );
+
+  const out: LookupResult[] = [];
+  for (const entry of arxivEntries(xml)) {
+    const err = arxivErrorNote(entry);
+    if (err) throw new LookupError(err);
+    const item = arxivEntryToCsl(entry);
+    const normalized = item && normalizeCsl(item);
+    if (normalized) out.push(toResult("arxiv", normalized));
+  }
+  // 맞는 것이 없으면 arXiv 는 항목이 하나도 없는 빈 피드를 준다 (200 이다).
+  if (out.length === 0) throw new LookupError("맞는 것이 없습니다");
+  return out;
+}
+
+/** 우리 컬럼 중 실제로 채워진 칸 수. 후보를 견주는 잣대다. */
+function filledCount(r: LookupResult): number {
+  return Object.values(r.fields).filter(
+    (v) => v !== null && v !== undefined && String(v).trim() !== "",
+  ).length;
+}
+
+/** 제목을 견주기 좋게 눌러 둔다. 대소문자·구두점·공백 차이는 같은 논문이다. */
+function titleKey(s: string | null): string {
+  return (s ?? "").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * 두 후보가 같은 논문인가.
+ *
+ * DOI 가 **양쪽에 다 있으면** 그것만 본다. 프리프린트 DOI 와 출판본 DOI 는
+ * 제목이 같아도 서로 다른 기록이라, 사람이 어느 쪽을 인용할지 고를 수 있게
+ * 둘 다 남겨야 한다. 한쪽에만 있거나 둘 다 없을 때 제목으로 견준다 —
+ * arXiv 항목은 출판 DOI 를 모르는 경우가 대부분이라 이 길로 온다.
+ */
+function sameWork(a: LookupResult, b: LookupResult): boolean {
+  const da = a.fields.doi?.toLowerCase();
+  const db = b.fields.doi?.toLowerCase();
+  if (da && db) return da === db;
+
+  const ta = titleKey(a.fields.title);
+  /*
+   * 짧은 열쇠는 믿지 않는다. `titleKey` 가 ASCII 가 아닌 글자를 다 벗기므로
+   * 한글 제목은 통째로 빈 문자열이 된다 — 그대로 견주면 한글 제목 둘이 늘
+   * 같은 논문으로 보여 서로 다른 후보가 하나로 뭉개진다.
+   */
+  return ta.length >= 8 && ta === titleKey(b.fields.title);
+}
+
+/**
+ * 다른 쪽에서 끌어오지 않는 칸.
+ *
+ * 갈래와 실릴 곳은 한 기록 안에서 **짝을 이룬다.** arXiv 쪽 `publisher: "arXiv"`
+ * 를 Crossref 의 학회 논문 위에 얹으면 "arXiv 가 펴낸 inproceedings" 라는
+ * 있지도 않은 항목이 BibTeX 로 나간다. 비어 있다고 아무거나 채울 칸이 아니다.
+ */
+const NO_CROSS_FILL = new Set([
+  "type", "id", "publisher", "publisher-place",
+  "container-title", "collection-title", "event", "event-title", "event-place",
+]);
+
+/**
+ * 둘 중 무엇을 바탕으로 삼을 것인가.
+ *
+ * **출판본이 프리프린트를 이긴다.** 칸 수로만 고르면 안 된다 — 겪은 것:
+ * ResNet 을 제목으로 찾으면 arXiv 쪽이 초록과 arXiv 번호까지 들고 와서 칸이
+ * 하나 더 차고, 그래서 바탕이 되어 버렸다. 합친 결과가 `venue: arXiv` 인데
+ * 쪽 번호는 770–778 인 이상한 기록이 됐다. BibTeX 로는 @misc 로 나가서
+ * CVPR 이라는 사실이 통째로 사라진다.
+ *
+ * 이 파일은 이미 같은 선택을 해 두었다 — arXiv 가 출판 DOI 를 알려 주면 그
+ * 길로 다시 가는 것(`lookup`)도 같은 이유다. 사람이 인용하고 싶은 것은
+ * 출판본이다. 둘 다 프리프린트거나 둘 다 아니면 그때 칸 수로 가른다.
+ */
+function preferBase(a: LookupResult, b: LookupResult): [LookupResult, LookupResult] {
+  if (a.source === "arxiv" && b.source !== "arxiv") return [b, a];
+  if (b.source === "arxiv" && a.source !== "arxiv") return [a, b];
+  return filledCount(a) >= filledCount(b) ? [a, b] : [b, a];
+}
+
+/**
+ * 같은 논문 둘을 하나로.
+ *
+ * 바탕의 **빈 칸만** 다른 쪽에서 메운다. 대개 Crossref 가 저널·권·쪽을 들고
+ * 오고 arXiv 가 초록과 arXiv 번호를 들고 오므로, 합친 하나가 어느 쪽 하나보다
+ * 낫다 — @inproceedings 에 booktitle·pages·doi 가 다 있고 eprint 까지 붙는다.
+ */
+function mergeTwo(a: LookupResult, b: LookupResult): LookupResult {
+  const [base, extra] = preferBase(a, b);
+
+  const csl: CSLItem = { ...base.csl };
+  for (const [k, v] of Object.entries(extra.csl)) {
+    if (k === "custom" || NO_CROSS_FILL.has(k)) continue;
+    const have = csl[k];
+    if (have === undefined || have === null || have === "") csl[k] = v;
+  }
+  // `custom` 은 통째로 덮으면 안 된다 — 한쪽에만 있는 arXiv 번호가 사라진다.
+  const custom = { ...(extra.csl.custom ?? {}), ...(base.csl.custom ?? {}) };
+  if (Object.keys(custom).length) csl.custom = custom;
+
+  // 출처는 바탕 쪽으로 적는다. 화면이 "어디서 온 후보인가" 로 쓰는 값이라
+  // 서지정보의 뼈대를 준 쪽을 가리키는 편이 맞다.
+  return toResult(base.source, csl, base.score ?? extra.score);
+}
+
+/**
+ * 두 곳에서 온 후보를 겹치지 않게 모은다.
+ *
+ * 그냥 이어 붙이면 안 되는 이유. 후보 목록에 똑같아 보이는 줄이 둘 있으면
+ * 고르는 사람은 무엇이 다른지 알 수 없어 아무거나 누른다. (게다가 시트가
+ * 후보의 열쇠를 DOI·제목으로 잡고 있어서 React 가 같은 key 라고 나무란다.)
+ */
+function mergeSameWorks(list: LookupResult[]): LookupResult[] {
+  const out: LookupResult[] = [];
+  for (const cand of list) {
+    const at = out.findIndex((seen) => sameWork(seen, cand));
+    if (at < 0) out.push(cand);
+    else out[at] = mergeTwo(out[at], cand);
+  }
+  return out;
+}
+
+/**
+ * 제목으로 찾기 — Crossref 와 arXiv 를 함께.
+ *
+ * **두 곳을 동시에 부른다.** 순서대로 하면 두 번의 왕복이 겹치지 않고 쌓여
+ * 최악에 `TIMEOUT_MS` 를 두 번 기다린다. 8초가 16초가 되면 사람은 단추가
+ * 멈춘 줄 안다. 한쪽이 넘어져도 다른 쪽 후보는 그대로 쓴다 — 반쪽이라도
+ * 있는 것이 빈 손보다 낫다.
+ *
+ * `steps` 를 주면 넘어진 쪽의 사연을 거기 적어 넣는다. 안 그러면 후보가 왜
+ * 반쪽인지 화면에서 알 길이 없다. 양쪽 다 넘어졌을 때만 던진다.
+ */
+export async function lookupByTitle(rawTitle: string, steps?: LookupStep[]): Promise<LookupResult[]> {
+  const title = rawTitle.trim().replace(/\s+/g, " ");
+  if (title.length < 4) throw new LookupError("제목이 너무 짧습니다 (네 글자 이상)");
+
+  const [cr, ax] = await Promise.allSettled([
+    searchCrossrefByTitle(title),
+    searchArxivByTitle(title),
+  ]);
+
+  if (steps) {
+    if (cr.status === "rejected") {
+      steps.push({ source: "crossref", query: title, ok: false, note: noteOf(cr.reason) });
+    }
+    if (ax.status === "rejected") {
+      steps.push({ source: "arxiv", query: title, ok: false, note: noteOf(ax.reason) });
+    }
+  }
+
+  const fromCrossref = cr.status === "fulfilled" ? cr.value : [];
+  const fromArxiv = ax.status === "fulfilled" ? ax.value : [];
+  const found = [...fromCrossref, ...fromArxiv];
+  if (found.length === 0) {
+    // 둘 다 빈 손. 사연은 이미 steps 에 적혔으니, 던지는 것은 대표 하나면 된다.
+    if (cr.status === "rejected") throw cr.reason;
+    if (ax.status === "rejected") throw ax.reason;
+    throw new LookupError("맞는 것이 없습니다");
+  }
+
+  const ranked = rankCandidates(mergeSameWorks(found));
+  /*
+   * 어디서 몇 개가 왔는지 여기서 적는다. 합친 뒤에는 알 수 없기 때문이다 —
+   * arXiv 후보가 Crossref 후보에 녹아들면 목록에는 `crossref` 한 줄만 남아서,
+   * 밖에서 세면 "arXiv 0개" 라는 거짓말이 된다.
+   */
+  const merged = found.length - ranked.length;
+  steps?.push({
+    source: "crossref",
+    query: title,
+    ok: true,
+    note:
+      `후보 ${ranked.length}개를 찾았습니다 (Crossref ${fromCrossref.length} · arXiv ${fromArxiv.length}` +
+      (merged ? `, 같은 논문 ${merged}개는 하나로 합쳤습니다` : "") +
+      "). 서지정보가 가장 갖춰진 것을 앞에 두었습니다",
+  });
+  return ranked;
 }
 
 /**
@@ -600,15 +844,16 @@ export async function lookupByTitle(rawTitle: string): Promise<LookupResult[]> {
  *
  * 채워진 칸 수를 먼저 보고, 같으면 그때 `score` 로 가른다. 후보 목록 자체는
  * 그대로 둔다 — 고르는 것은 사람이고, 우리는 순서만 바꾼다.
+ *
+ * arXiv 후보에는 `score` 가 없다(0 으로 친다). 그래도 뒤로 밀리지 않는데,
+ * 앞의 잣대인 채워진 칸 수에서 arXiv 는 초록과 arXiv 번호까지 들고 오기
+ * 때문이다. 애초에 arXiv 를 붙인 이유가 Crossref 가 못 찾는 학회 논문이라,
+ * 그쪽이 앞에 서는 것이 우리가 바라던 바다.
  */
 function rankCandidates(list: LookupResult[]): LookupResult[] {
-  const filled = (r: LookupResult) =>
-    Object.values(r.fields).filter(
-      (v) => v !== null && v !== undefined && String(v).trim() !== "",
-    ).length;
   // 원본을 건드리지 않는다. 부르는 쪽이 같은 배열을 또 쓸 수 있다.
   return [...list].sort(
-    (a, b) => filled(b) - filled(a) || (b.score ?? 0) - (a.score ?? 0),
+    (a, b) => filledCount(b) - filledCount(a) || (b.score ?? 0) - (a.score ?? 0),
   );
 }
 
@@ -682,17 +927,20 @@ export async function lookup(q: LookupQuery): Promise<LookupReport> {
 
   const title = q.title?.trim();
   if (title) {
+    /*
+     * 제목만은 두 곳(Crossref·arXiv)을 함께 부른다. 어느 쪽에서 몇 개가 왔고
+     * 어느 쪽이 왜 넘어졌는지는 `lookupByTitle` 이 `steps` 에 직접 적는다 —
+     * 합치고 난 목록만 보고는 밖에서 다시 셀 수 없다.
+     */
+    const before = steps.length;
     try {
-      const found = await lookupByTitle(title);
-      steps.push({
-        source: "crossref",
-        query: title,
-        ok: true,
-        note: `후보 ${found.length}개를 찾았습니다. 서지정보가 가장 갖춰진 것을 앞에 두었습니다`,
-      });
-      return { candidates: found, steps };
+      return { candidates: await lookupByTitle(title, steps), steps };
     } catch (e) {
-      steps.push({ source: "crossref", query: title, ok: false, note: noteOf(e) });
+      // 양쪽 다 넘어졌으면 사연은 이미 위에서 적혔다. 아무것도 안 적힌 경우
+      // — 물어보기도 전에 거절한 "제목이 너무 짧습니다" — 만 여기서 남긴다.
+      if (steps.length === before) {
+        steps.push({ source: "crossref", query: title, ok: false, note: noteOf(e) });
+      }
     }
   }
 

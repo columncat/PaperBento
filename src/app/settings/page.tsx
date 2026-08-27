@@ -1,6 +1,7 @@
 import { ArrowLeft, ChevronRight, Clock, Database, LogOut } from "lucide-react";
 import Link from "next/link";
 
+import { ExportMenu } from "@/components/export-menu";
 import { PreferencesPanel } from "@/components/preferences-panel";
 import { SettingsExport } from "@/components/settings-export";
 import { apiPath } from "@/lib/api-path";
@@ -103,6 +104,42 @@ export default async function SettingsPage() {
 
       {/* 백업 */}
       <SettingsExport />
+
+      {/*
+        서지정보 내보내기 — 바로 위 "백업" 과 다른 것이다.
+
+        둘 다 파일 하나가 떨어지는 단추라 붙여 두면 반드시 헷갈린다. 그래서
+        같은 카드에 합치지 않고, 서로가 무엇이 **아닌지**를 두 줄로 적었다.
+        백업은 우리 DB 모양 그대로라 되살리기 말고는 쓸 데가 없고(BibTeX 키도
+        저자 성/이름 구분도 없다), 이쪽은 position·groupId 같은 우리 사정이
+        빠진 대신 남의 프로그램이 읽는다.
+
+        `?paper=` 도 `?group=` 도 주지 않으면 라우트가 서재 전체로 읽는다.
+      */}
+      <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
+        <header className="mb-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-base font-medium text-(--color-fg)">서지정보 내보내기</div>
+            <div className="text-xs break-keep text-(--color-fg-4)">
+              서재에 든 논문 {papers}편을 논문 관리자가 읽는 형식으로 내보냅니다.
+            </div>
+          </div>
+          <ExportMenu
+            target={{}}
+            label="서재 전체"
+            title="서재 전체를 BibTeX · RIS · CSL-JSON 으로"
+            className="bg-(--color-bg-2)"
+          />
+        </header>
+
+        <p className="text-[11px] break-keep text-(--color-fg-4)">
+          위의 <b>백업</b>과 다른 것입니다. 백업은 <b>이 앱으로 되살리기</b> 위한
+          것이고(서가·요약·메모까지 우리 모양 그대로), 이쪽은{" "}
+          <b>Zotero·EndNote·LaTeX 에 넣을 인용 자료</b>입니다. 원본 서지정보가
+          없는 논문도 빠지지 않습니다 — 적어 둔 칸으로 최소한을 만들어 함께
+          내보냅니다.
+        </p>
+      </section>
 
       {/* 기록 */}
       <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">

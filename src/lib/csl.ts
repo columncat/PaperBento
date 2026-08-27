@@ -597,9 +597,26 @@ export function toBibTeX(item: CSLItem, key?: string): string {
 
   put("issn", item.ISSN);
   put("isbn", item.ISBN);
-  put("doi", item.DOI);
-  // url 은 이스케이프하지 않는다. `_` 와 `~` 가 든 주소가 흔한데 `\_` 로 바꾸면
-  // 그대로 인쇄되어 주소가 틀린다. \url{} 안에서는 원문이 맞다.
+  /*
+   * doi 와 url 은 **이스케이프하지 않는다. 둘 다 verbatim 칸이다.**
+   *
+   * biblatex 는 `doi` 와 `url` 을 든 글자 그대로 조판하고, 같은 글자를
+   * 하이퍼링크 주소로도 쓴다. 그래서 `10.1007/978-3-319-46448-0_13` 의 밑줄을
+   * `\_` 로 적어 두면 역슬래시가 **그대로 인쇄되고 링크도 깨진다.** 밑줄이 든
+   * DOI 는 Springer 학회 논문집(LNCS)에 흔해서 드문 일이 아니다.
+   *
+   * 대신 잃는 것이 있다 — 옛 BibTeX 다. 옛 BibTeX 도 doi 를 **안 찍는**
+   * 스타일(`plain`·`abbrv`)이면 아무 일도 없다. 모르는 칸을 통째로 버리므로
+   * `_` 가 LaTeX 까지 닿지 않는다. doi 를 찍는 스타일에서만 `_` 가 수식
+   * 아래첨자로 읽혀 `Missing $ inserted` 로 조판이 멈춘다.
+   *
+   * **양쪽을 다 만족시키는 한 벌은 없다.** 한쪽은 이스케이프해야 살고 다른
+   * 쪽은 이스케이프하면 죽는다. 요즘 대부분 biblatex 를 쓰므로 그쪽으로
+   * 맞춘다. 옛 BibTeX 로 그 오류를 만난 사람은 서문에 `\usepackage{url}` 을
+   * 넣고 doi 를 `\url{}` 로 감싸는 스타일을 쓰거나, 받은 .bib 에서 그 밑줄만
+   * `\_` 로 고치면 된다 — 고칠 자리가 눈에 보이는 쪽이 낫다.
+   */
+  put("doi", item.DOI, true);
   put("url", item.URL, true);
 
   if (arxivId) {
@@ -653,6 +670,23 @@ const RIS_TYPE: Record<string, string> = {
   document: "GEN",
 };
 
+/**
+ * RIS 의 줄 끝은 **CRLF** 다. 규격이 그렇게 적어 두었다.
+ *
+ * Zotero·Mendeley 는 LF 만 있어도 알아서 읽어서 여태 눈에 안 띄었다. 까다로운
+ * 것은 옛 EndNote 다 — 줄을 못 갈라서 항목을 통째로 되돌리거나, 첫 줄만 읽고
+ * 나머지를 버린다. 받는 쪽이 무엇일지 우리는 모르므로 규격대로 적는다.
+ *
+ * 값 안에는 CR 도 LF 도 들어오지 않는다 — `clean()` 이 이미 공백 하나로 눌러
+ * 둔다. 그러니 여기서 달라지는 것은 정말 줄 끝뿐이다.
+ *
+ * 크기와 헤더는 어긋날 자리가 없다. 내보내기 라우트는 만든 글자열을 그대로
+ * `NextResponse` 에 넘기고 Content-Length 는 런타임이 UTF-8 바이트로 다시
+ * 센다. 손으로 세어 둔 길이가 어디에도 없다. `EXPORT_MIME.ris` 도 그대로다 —
+ * 줄 끝은 charset 이 정하는 것이 아니다.
+ */
+const RIS_EOL = "\r\n";
+
 function risName(n: CSLName): string {
   if (n.literal) return n.literal.trim();
   const family = [n["non-dropping-particle"], n.family].filter(Boolean).join(" ").trim();
@@ -666,6 +700,7 @@ function risName(n: CSLName): string {
  *
  * RIS 는 `TAG  - 값` 이고 **가운데 공백이 둘**이다. 하나면 엄격한 파서가
  * 통째로 무시한다. 값에 줄바꿈이 있어도 안 된다 — `clean()` 이 이미 눌러 둔다.
+ * 줄 끝은 `RIS_EOL`(CRLF).
  */
 export function toRIS(item: CSLItem): string {
   const lines: string[] = [];
@@ -713,7 +748,7 @@ export function toRIS(item: CSLItem): string {
   put("N1", item.note);
 
   lines.push("ER  - ");
-  return lines.join("\n");
+  return lines.join(RIS_EOL);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -730,7 +765,11 @@ export function renderBibliography(papers: PaperLike[], format: ExportFormat): s
   const items = papers.map((p) => toCSL(p));
 
   if (format === "csl") return `${JSON.stringify(items, null, 2)}\n`;
-  if (format === "ris") return `${items.map((i) => toRIS(i)).join("\n\n")}\n`;
+  // 항목 사이는 빈 줄 하나. 그 빈 줄도 RIS 의 줄이라 CRLF 로 끝나야 한다 —
+  // `ER  -` 뒤가 LF 면 옛 EndNote 가 다음 항목을 앞 항목에 이어 붙인다.
+  if (format === "ris") {
+    return `${items.map((i) => toRIS(i)).join(`${RIS_EOL}${RIS_EOL}`)}${RIS_EOL}`;
+  }
 
   const keys = assignKeys(items);
   return `${items.map((i, n) => toBibTeX(i, keys[n])).join("\n\n")}\n`;

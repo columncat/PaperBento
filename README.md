@@ -127,4 +127,9 @@ AGENT_TOKEN=…
 
 ## 라이선스
 
-[MIT](LICENSE)
+이 앱의 코드는 [MIT](LICENSE) 다.
+
+다만 **브라우저로 내려보내는 것 안에 남이 쓴 것이 섞여 있고** 그중 둘은 MIT 가
+아니다 — 인용문을 만드는 citeproc-js(CPAL-1.0)와 CSL 스타일(CC BY-SA 3.0).
+무엇이 어떤 라이선스로 함께 나가는지는 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+에 적어 두었다.
