@@ -48,9 +48,9 @@ const AGENT_TOKEN = process.env.AGENT_TOKEN?.trim();
  * `/chat/start` 가 아니다. 그쪽은 공용 세션에 전권 도구로 붙는다 — 논문 글자를
  * 거기 넣으면 위의 1·2번이 통째로 무너진다.
  *
- * 이 경로는 BentoAgent 쪽에 **아직 없다.** 없으면 404 가 오고, 그때 사람에게
- * 무엇이 빠졌는지 그대로 말한다. 우리 쪽에서 `/chat/start` 로 물러나지 않는다 —
- * 물러나는 순간 방어가 사라지는데 화면에는 잘 도는 것처럼 보인다.
+ * BentoAgent 의 `src/http.ts` 에 있다. 없는 판을 만나면 404 가 오고, 그때
+ * 사람에게 무엇이 빠졌는지 그대로 말한다. 우리 쪽에서 `/chat/start` 로 물러나지
+ * 않는다 — 물러나는 순간 방어가 사라지는데 화면에는 잘 도는 것처럼 보인다.
  */
 const TASK_PATH = "/task";
 const TASK_STATUS_PATH = "/task/status";
