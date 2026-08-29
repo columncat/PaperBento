@@ -19,10 +19,18 @@ import { countPapers, type GroupDTO, type PaperDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { AgentChat } from "./agent-chat";
+import {
+  BiblioBatchPanel,
+  fillOne,
+  type BatchRowStatus,
+  type BatchState,
+  type BiblioPrefill,
+} from "./biblio-batch";
 import { MailBentoLink, MemoBentoLink } from "./cross-app-link";
 import { AddGroupCard, type GroupHandlers } from "./group-card";
 import type { PaperRowActions } from "./paper-row";
 import { PaperSheet, type SheetTarget } from "./paper-sheet";
+import { SearchBar, SearchResults, useLibrarySearch } from "./search-panel";
 import { SortableGroupCard } from "./sortable-group-card";
 import { UploadPanel, useUploadSummary } from "./upload-panel";
 import { enqueueUploads, setUploadSink, type UploadedPaper } from "./upload-queue";
@@ -151,17 +159,233 @@ export function Library({
     if (uploads.active > 0) setQueueOpen(true);
   }, [uploads.active]);
 
+  /*
+   * ── 여러 편을 올렸을 때: **한 번만 묻고 모두 채운다** ───────────────
+   *
+   * 열 편을 올린 사람에게 시트를 열 번 열어 편마다 1분씩 기다리게 할 수는 없다.
+   * 에이전트는 어차피 한 줄로 서서 하나씩 도니까, 화면 앞에 붙들려 있으나
+   * 아니나 걸리는 시간은 같다. 그래서 **기다리는 일은 배치가 한 번에 하고,
+   * 확인하는 일만 편마다 한다.** 다 돈 뒤에 시트가 하나씩 열리는데, 그때는 값이
+   * 이미 칸에 앉아 있어서 사람이 할 일은 훑어보고 Ctrl+Enter 를 누르는 것뿐이다.
+   *
+   * **끝까지 자동으로 저장하지는 않는다.** 논문 본문은 남이 만든 파일이다.
+   * 배치가 저장까지 하면 PDF 에 심어 둔 문장이 사람 없이 서재를 고친다. 배치는
+   * 제안이 `paper_suggestions` 에 앉는 데서 끝나고, `papers` 를 쓰는 요청은
+   * 사람이 시트에서 저장을 누를 때 딱 한 번 나간다.
+   *
+   * 한 편만 올렸을 때는 **묻지 않는다.** 시트가 곧바로 열리고 그 제일 위에
+   * 같은 단추가 있다 — 확인 하나가 늘 때마다 올리는 일이 그만큼 성가셔진다.
+   */
+  const [batch, setBatch] = useState<BatchState | null>(null);
+  /*
+   * 배치가 미리 돌아 둔 값. 시트가 열릴 때 건네준다.
+   *
+   * 상태가 아니라 ref 인 것은 이 값이 화면을 다시 그릴 이유가 없기 때문이다 —
+   * 읽는 곳은 시트를 여는 그 한 줄뿐이고, 판을 닫아도 남아 있어야 한다.
+   */
+  const prefills = useRef<Map<string, BiblioPrefill>>(new Map());
+
+  const startUpload = useCallback((groupId: string, files: File[]) => {
+    if (files.length > 1) setBatch({ phase: "probing", total: files.length, rows: [] });
+    enqueueUploads(groupId, files);
+  }, []);
+
+  /*
+   * 물어보기 전에 **부를 수 있는지부터 본다.** 못 부르면 묻지도 않는다.
+   *
+   * 첫 편이 다 올라온 뒤에 묻는 것은, 그때가 되어야 물어볼 `paperId` 가 생기기
+   * 때문이다. 시트가 쓰는 것과 **같은 판정**(`/suggest` 의 `agent`)을 쓴다 —
+   * 여기만 따로 재면 시트에서는 되는데 배치에서는 안 되는 날이 온다.
+   *
+   * 나머지 파일은 그동안에도 계속 올라간다. 묻는 것이 올리기를 막지 않는다.
+   */
+  const firstUploaded = waiting[0]?.paperId ?? null;
   useEffect(() => {
-    if (sheet || waiting.length === 0) return;
+    if (batch?.phase !== "probing") return;
+    if (!firstUploaded) {
+      /*
+       * 다 올라갈 때까지 기다렸는데 하나도 안 왔다 = 전부 실패했다.
+       *
+       * 여기서 판을 접지 않으면 `batch` 가 "probing" 인 채로 남고, 그 뒤로는
+       * 배수구가 막혀 **한 편을 올려도 시트가 안 열린다.** 물어볼 것이 없어진
+       * 상태를 붙들고 있을 이유가 없다.
+       */
+      if (uploads.active === 0) setBatch(null);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const [state, config] = await Promise.all([
+        api.biblio.status(firstUploaded).catch(() => null),
+        api.getConfig().catch(() => null),
+      ]);
+      if (!alive) return;
+      if (!state?.agent.ready) {
+        // 배치를 접는다. 예전처럼 한 편씩 시트가 열린다.
+        setBatch(null);
+        return;
+      }
+      setBatch((b) =>
+        b && b.phase === "probing"
+          ? // 설정에서 "기본으로 맡긴다" 를 켜 둔 사람에게는 이미 답을 들은
+            // 셈이다. 같은 질문을 올릴 때마다 다시 하지 않는다.
+            { ...b, phase: config?.agentSuggestDefault ? "running" : "asking" }
+          : b,
+      );
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [batch?.phase, firstUploaded, uploads.active]);
+
+  /*
+   * 도는 몸통.
+   *
+   * 줄 서 있는 것을 하나씩 집어 `fillOne` 에 넘긴다. 업로드가 직렬이라 뒤 파일은
+   * 아직 올라오는 중일 수 있으므로, 다 올라올 때까지 기다렸다 이어 간다.
+   *
+   * **하나가 실패해도 나머지는 돈다.** 열 편 중 셋이 스캔본이라고 나머지 일곱을
+   * 버릴 이유가 없다. 실패한 것은 판에 이유가 남고, 그 편의 시트에서는 사람이
+   * 단추를 다시 누를 수 있다.
+   *
+   * 값을 ref 로 읽는 것은 이 반복이 몇 분을 도는 동안 상태가 계속 바뀌기
+   * 때문이다. 효과에 담아 두면 시작할 때의 옛 목록만 보게 된다.
+   */
+  const waitingRef = useRef<UploadedPaper[]>([]);
+  const activeRef = useRef(0);
+  const groupsRef = useRef<GroupDTO[]>(groups);
+  const runningRef = useRef(false);
+  const stopRef = useRef(false);
+  useEffect(() => {
+    waitingRef.current = waiting;
+  }, [waiting]);
+  useEffect(() => {
+    activeRef.current = uploads.active;
+  }, [uploads.active]);
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+
+  useEffect(() => {
+    if (batch?.phase !== "running" || runningRef.current) return;
+    runningRef.current = true;
+    stopRef.current = false;
+
+    const mark = (paperId: string, status: BatchRowStatus, note?: string) =>
+      setBatch((b) =>
+        b
+          ? { ...b, rows: b.rows.map((r) => (r.paperId === paperId ? { ...r, status, note } : r)) }
+          : b,
+      );
+
+    void (async () => {
+      const seen = new Set<string>();
+      try {
+        for (;;) {
+          if (stopRef.current) break;
+          const next = waitingRef.current.find((w) => !seen.has(w.paperId));
+          if (!next) {
+            // 아직 올라오는 중인 것이 있으면 기다린다.
+            await new Promise((r) => setTimeout(r, 600));
+            if (activeRef.current > 0) continue;
+            // 다 올라갔다. 다만 마지막 한 편이 방금 도착해 아직 상태에 안 앉았을
+            // 수 있으니 한 박자 뒤에 한 번 더 보고 접는다.
+            if (waitingRef.current.some((w) => !seen.has(w.paperId))) continue;
+            break;
+          }
+          seen.add(next.paperId);
+
+          const paper = findPaper(groupsRef.current, next.paperId);
+          const name = paper?.title ?? next.file.name;
+          setBatch((b) =>
+            b ? { ...b, rows: [...b.rows, { paperId: next.paperId, name, status: "lookup" }] } : b,
+          );
+
+          let report = null;
+          try {
+            const out = await fillOne(
+              next.paperId,
+              {
+                title: paper?.title ?? next.file.name,
+                doi: paper?.doi ?? null,
+                arxivId: paper?.arxivId ?? null,
+              },
+              {
+                alive: () => !stopRef.current,
+                onReport: (r) => (report = r),
+                onAgent: () => mark(next.paperId, "agent"),
+              },
+            );
+            if (out.kind === "aborted") break;
+            if (out.kind === "picking") {
+              // 후보를 고르는 일은 우리 것이 아니다. 시트가 목록을 띄운다.
+              prefills.current.set(next.paperId, {
+                report: out.report,
+                picked: null,
+                guess: null,
+                guessId: null,
+                pendingPick: true,
+              });
+              mark(next.paperId, "picking", `후보 ${out.report.candidates.length}개 — 시트에서 고르세요`);
+              continue;
+            }
+            if (out.kind === "failed") {
+              // 찾아온 것이 있으면 그것만이라도 넘긴다. 에이전트가 넘어진 것이
+              // 등록기관 값까지 버릴 이유는 아니다.
+              prefills.current.set(next.paperId, {
+                report,
+                picked: out.picked,
+                guess: null,
+                guessId: null,
+                error: out.error,
+              });
+              mark(next.paperId, "failed", out.error);
+              continue;
+            }
+            prefills.current.set(next.paperId, {
+              report,
+              picked: out.picked,
+              guess: out.guess,
+              guessId: out.guessId,
+            });
+            mark(next.paperId, "done");
+          } catch (e) {
+            mark(next.paperId, "failed", e instanceof Error ? e.message : "채우지 못했습니다");
+          }
+        }
+      } finally {
+        runningRef.current = false;
+        setBatch((b) => (b && b.phase === "running" ? { ...b, phase: "review" } : b));
+      }
+    })();
+  }, [batch?.phase]);
+
+  useEffect(() => {
+    // 배치가 도는 동안에는 시트를 열지 않는다. 시트가 떠 있으면 그 논문의
+    // 칸이 배치와 따로 놀고, 무엇보다 사람이 열 번 기다리게 된다.
+    if (batch && batch.phase !== "review") return;
+    if (sheet) return;
+    if (waiting.length === 0) {
+      // 다 확인했으면 판을 치운다.
+      if (batch) setBatch(null);
+      return;
+    }
     const [next, ...rest] = waiting;
     setWaiting(rest);
     const paper = findPaper(groups, next.paperId);
     // 못 찾으면 줄에서 빼고 넘어간다. 그대로 두면 같은 것을 다시 집어
     // 무한히 도는데, 시트가 안 뜨는 것보다 그쪽이 훨씬 나쁘다.
     if (paper) {
-      setSheet({ mode: "edit", groupId: paper.groupId, paper, fresh: true });
+      setSheet({
+        mode: "edit",
+        groupId: paper.groupId,
+        paper,
+        fresh: true,
+        prefill: prefills.current.get(next.paperId),
+      });
     }
-  }, [sheet, waiting, groups]);
+    prefills.current.delete(next.paperId);
+  }, [sheet, waiting, groups, batch]);
 
   // ─ 서가 조작 ─
   const handlers: GroupHandlers = useMemo(
@@ -217,7 +441,7 @@ export function Library({
       },
       promote: (id) => void run(() => api.updateGroup(id, { parentId: null })).catch(() => undefined),
       addPaper: (groupId) => setSheet({ mode: "create", groupId }),
-      uploadTo: (groupId, files) => enqueueUploads(groupId, files),
+      uploadTo: startUpload,
       reorderPapers: (groupId, orderedIds) => {
         // 낙관적 반영 — 놓는 순간 자리가 잡혀야 한다.
         setGroups((prev) => reorderIn(prev, groupId, orderedIds));
@@ -225,7 +449,7 @@ export function Library({
       },
       notify: (message) => fail(new Error(message)),
     }),
-    [run, fail, groups],
+    [run, fail, groups, startUpload],
   );
 
   // ─ 논문 조작 ─
@@ -275,6 +499,18 @@ export function Library({
     });
   };
 
+  /*
+   * 찾기.
+   *
+   * 질의·칩·짚은 자리는 `search-panel.tsx` 가 든다. 이 파일 머리말의
+   * "상태는 전부 여기 있다" 는 **논문 데이터**를 두고 한 말이다 — 같은 논문이
+   * 두 곳에 그려질 때 갈라지는 것을 막으려는 규칙이고, 질의는 서버로도 안
+   * 나가고 한 곳에만 그려진다. 대신 결과는 `groups` 를 넘겨 **거기서
+   * 파생시킨다**: 스냅샷을 따로 들면 위의 4초 폴링이 서재를 갈아 끼운 뒤에도
+   * 지워진 논문이 결과에 남는다.
+   */
+  const search = useLibrarySearch(groups);
+
   const totalPapers = groups.reduce((s, g) => s + countPapers(g), 0);
 
   return (
@@ -294,6 +530,17 @@ export function Library({
             </p>
           </div>
         </div>
+
+        {/*
+          찾기 상자는 머리말의 **세 번째** 자식이다. `flex-wrap` +
+          `justify-between` 이라 넓은 화면에서는 가운데에 앉아 남는 폭을 먹고,
+          좁아지면 `order-3` 덕에 제 줄로 통째로 내려간다 — 아이콘 단추들과
+          한 줄에서 폭을 다투지 않는다.
+        */}
+        <SearchBar
+          search={search}
+          className="order-3 w-full md:order-none md:w-auto md:max-w-xl md:flex-1"
+        />
 
         <div className="flex items-center gap-2">
           <button
@@ -333,25 +580,58 @@ export function Library({
         </div>
       </header>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={groups.map((g) => g.id)} strategy={rectSortingStrategy}>
-          <section className={cn("grid gap-4", COLUMN_CLASS[columns])}>
-            {groups.map((g) => (
-              <SortableGroupCard
-                key={g.id}
-                group={g}
-                handlers={handlers}
-                paperActions={paperActions}
-              />
-            ))}
-            <AddGroupCard onCreate={(name) => void run(() => api.createGroup(name)).catch(() => undefined)} />
-          </section>
-        </SortableContext>
-      </DndContext>
+      {/*
+        찾는 동안에는 격자를 **떼어 낸다** — `hidden` 으로 감추지 않는다.
+        결과 목록은 서가를 가로지르는 납작한 한 줄이라 순서라는 것이 없는데,
+        `SortableContext` 를 띄워 둔 채 결과만 얹으면 화면 밖 카드가 여전히
+        dnd 에 등록되어 있다. 순서를 바꿀 수 없는 화면에서 끌기가 걸리는 것보다
+        떼어 내는 편이 안전하다.
+        값은 치른다: 카드마다의 스크롤 자리(각 카드가 제 `overflow-y-auto` 를
+        갖는다)와 이름 고치는 중이던 상태가 사라져, 질의를 지우면 서가들이 맨
+        위로 되감긴다. 끌기가 잘못 걸리는 것보다 이쪽이 덜 나쁘다고 봤다.
 
-      <footer className="mt-2 text-center text-xs text-(--color-fg-4)">
-        PDF 를 서가에 <b>끌어다 놓으면</b> 올린 뒤 등록 시트가 열립니다 · 카드
-        머리말을 끌면 서가 순서, 표지를 끌면 논문 순서가 바뀝니다
+        질의가 주소(`?q=`)에 실리게 된 뒤에도 이 값은 늘지 않는다. 주소를
+        고쳐 쓰는 것은 `history.replaceState` 라 길 이동이 아니고, 그래서 이
+        갈래가 다시 그려지지도 격자가 다시 마운트되지도 않는다 (`router.replace`
+        였다면 글자를 칠 때마다 서버 컴포넌트를 다시 받아 왔을 것이다 —
+        `search-panel.tsx` 의 주소 쓰기 자리에 적어 뒀다).
+        오히려 되감기는 **줄었다**: 결과에서 논문을 열었다 뒤로 오면 질의가
+        되살아나 이 갈래로 바로 들어오므로, 예전처럼 빈 격자를 그렸다가 다시
+        치는 일이 없다.
+      */}
+      {search.active ? (
+        <SearchResults search={search} actions={paperActions} />
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={groups.map((g) => g.id)} strategy={rectSortingStrategy}>
+            <section className={cn("grid gap-4", COLUMN_CLASS[columns])}>
+              {groups.map((g) => (
+                <SortableGroupCard
+                  key={g.id}
+                  group={g}
+                  handlers={handlers}
+                  paperActions={paperActions}
+                />
+              ))}
+              <AddGroupCard onCreate={(name) => void run(() => api.createGroup(name)).catch(() => undefined)} />
+            </section>
+          </SortableContext>
+        </DndContext>
+      )}
+
+      <footer className="mt-2 text-center text-xs break-keep text-(--color-fg-4)">
+        {search.active ? (
+          <>
+            <b>↑↓</b> 로 옮기고 <b>Enter</b> 로 엽니다 · <b>Esc</b> 로 지웁니다 ·
+            찾는 동안에는 순서를 바꿀 수 없습니다
+          </>
+        ) : (
+          <>
+            PDF 를 서가에 <b>끌어다 놓으면</b> 올린 뒤 등록 시트가 열립니다 · 카드
+            머리말을 끌면 서가 순서, 표지를 끌면 논문 순서가 바뀝니다 · <b>/</b> 로
+            찾기
+          </>
+        )}
       </footer>
 
       <PaperSheet
@@ -371,6 +651,19 @@ export function Library({
       />
 
       <UploadPanel open={queueOpen} onClose={() => setQueueOpen(false)} />
+
+      {batch && (
+        <BiblioBatchPanel
+          state={batch}
+          onStart={() => setBatch((b) => (b ? { ...b, phase: "running" } : b))}
+          // "하나씩 확인" — 배치를 접으면 위의 배수구가 곧바로 시트를 연다.
+          onSkip={() => setBatch(null)}
+          onStop={() => {
+            stopRef.current = true;
+          }}
+          onClose={() => setBatch(null)}
+        />
+      )}
 
       {/* 오류 토스트 */}
       {error && (

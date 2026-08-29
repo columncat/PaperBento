@@ -36,10 +36,18 @@ import { cn } from "@/lib/utils";
  * 것을 알아야 하는 쪽(pdf.js 뷰어처럼)은 window 를 듣지 말고 `ResizeObserver`
  * 로 자기 요소를 봐야 한다. 그러지 않으면 칸막이를 끌 때마다 원문이 잘리거나
  * 여백이 남는다.
+ *
+ * ## 접기는 비율과 다른 일이다
+ *
+ * `collapsed` 는 비율을 건드리지 않는다. `ratio` 를 1 로 밀어 접는 길은 두 번
+ * 막혀 있다 — `maxRatio` 클램프에 걸려 끝까지 가지도 못하고, 설령 갔더라도 그
+ * 값이 저장되어 **사람이 맞춰 둔 폭을 덮어쓴다.** 접었다 펴면 예전 폭이 그대로
+ * 돌아와야 한다.
  */
 export function SplitPane({
   left,
   right,
+  collapsed = false,
   storageKey,
   defaultRatio = 0.58,
   minRatio = 0.25,
@@ -52,6 +60,18 @@ export function SplitPane({
 }: {
   left: ReactNode;
   right: ReactNode;
+  /**
+   * 오른쪽 칸을 접었는가. 접으면 왼쪽이 화면을 다 쓴다.
+   *
+   * **오른쪽은 언마운트하지 않고 감춘다.** 접는 것은 "지금은 안 본다" 이지
+   * "버린다" 가 아니다 — 답을 기다리던 대화, 적다 만 글이 접는 순간 사라지면
+   * 접기가 위험한 단추가 된다. 다시 펴면 그 자리 그대로여야 한다.
+   *
+   * 접는 것은 **오른쪽뿐이다.** 왼쪽을 감추는 길은 일부러 두지 않았다 —
+   * pdf.js 는 상자 폭 0 을 그대로 배율 계산에 넣어 음수 배율을 박아 버린다.
+   * 원문을 접는 날이 오면 그때는 감추지 말고 언마운트해야 한다.
+   */
+  collapsed?: boolean;
   /** 비율을 기억할 localStorage 칸. 없으면 기억하지 않는다. */
   storageKey?: string;
   /** 기억된 값이 없을 때, 그리고 칸막이를 두 번 눌렀을 때 돌아갈 자리. */
@@ -135,7 +155,13 @@ export function SplitPane({
     >
       <div
         className={cn(
-          "flex min-w-0 flex-col xl:shrink-0 xl:grow-0 xl:basis-[calc(var(--split-l,0.58)*100%)]",
+          "flex min-w-0 flex-col",
+          // 접었을 때 basis 를 아예 안 내놓는다. 두 클래스를 함께 두고 뒤에
+          // 오는 것이 이기기를 기대하면, 어느 쪽이 이길지가 클래스 병합기의
+          // 규칙에 달린다 — 그건 여기서 정할 일이지 거기 맡길 일이 아니다.
+          collapsed
+            ? "xl:basis-full"
+            : "xl:shrink-0 xl:grow-0 xl:basis-[calc(var(--split-l,0.58)*100%)]",
           leftClassName,
         )}
       >
@@ -145,7 +171,12 @@ export function SplitPane({
       {/*
         칸막이. 잡는 자리는 손가락이 닿게 넉넉히 두고, 보이는 선은 얇게 둔다 —
         굵은 선이 늘 그어져 있으면 두 칸이 별개의 화면처럼 갈라져 보인다.
+
+        접혔으면 아예 안 그린다. 나눌 것이 없는데 선이 남아 있으면 끌 수 있어
+        보이고, 끌어도 아무 일이 안 일어난다. 칸막이는 상태를 안 들고 있어
+        지웠다 되살려도 잃는 것이 없다 — 폭은 바깥의 `ratio` 가 들고 있다.
       */}
+      {!collapsed && (
       <div
         role="separator"
         aria-orientation="vertical"
@@ -197,10 +228,12 @@ export function SplitPane({
           )}
         />
       </div>
+      )}
 
       <div
         className={cn(
-          "flex min-w-0 flex-1 flex-col",
+          // `hidden` 과 `flex` 를 함께 두지 않는다. 위 왼쪽 칸과 같은 이유다.
+          collapsed ? "hidden" : "flex min-w-0 flex-1 flex-col",
           // 쌓였을 때 어느 쪽이 위로 오는지. 넓어지면 DOM 순서로 돌아간다.
           stackFirst === "right" && "order-first xl:order-none",
           rightClassName,

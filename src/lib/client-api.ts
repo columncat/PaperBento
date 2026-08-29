@@ -1,4 +1,5 @@
 import { apiPath } from "./api-path";
+import { rawQueryWords, type FrontField } from "./filter-papers";
 import { readJson } from "./read-json";
 import type {
   Anchor,
@@ -150,6 +151,163 @@ export interface BiblioAgentState {
   agent: { ready: boolean; reason: string | null };
 }
 
+// ─────────────────────────────────────────────────────────────
+//   논문 대화
+// ─────────────────────────────────────────────────────────────
+
+/*
+ * 이 모양들은 BentoAgent 의 `/paper` 계열이 내놓는 것과 짝이다. 프록시
+ * (`/api/papers/:id/chat`)는 거의 그대로 흘려보내므로 여기가 유일한 정의다.
+ */
+
+export interface PaperChatTurn {
+  role: "me" | "agent";
+  text: string;
+  at?: number;
+}
+
+/**
+ * 진행 중인 요청의 상태.
+ *
+ * `toolCount` 와 `lastTool` 은 **없을 수 있다.** 계약이 약속한 것은
+ * `state`·`elapsedMs`·`reply` 까지고 나머지는 덤이라, 화면은 온 것만 그린다.
+ * 없다고 진행 표시가 사라지지는 않는다 — 경과 초는 늘 온다.
+ */
+export interface PaperChatStatus {
+  state: "running" | "done";
+  elapsedMs: number;
+  toolCount?: number;
+  lastTool?: string | null;
+  reply?: string;
+  isError?: boolean;
+  denials?: string[];
+}
+
+export interface PaperChatHistory {
+  turns: PaperChatTurn[];
+  /** 부를 수 있는가. 못 부르면 대화창은 꺼진 채로 이유만 적는다. */
+  agent: { ready: boolean; reason: string | null };
+}
+
+// ─────────────────────────────────────────────────────────────
+//   찾기
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 목록에 안 실려 브라우저가 **볼 수 없는** 세 곳.
+ *
+ * 나머지 여덟(`FrontField`)은 `/api/groups` 가 이미 내려보냈다. 그래서 화면은
+ * 왕복 없이 그 여덟으로 먼저 거르고, 이 셋은 서버 답을 기다린다.
+ */
+export const DEEP_WHERE = ["summary", "note", "pdf"] as const;
+export type DeepWhere = (typeof DEEP_WHERE)[number];
+
+/** 낱말이 맞을 수 있는 자리 열한. 앞 칸 여덟 + 깊은 자리 셋. */
+export type SearchWhere = FrontField | DeepWhere;
+
+/**
+ * 찾기에 걸린 논문 하나.
+ *
+ * **판정은 전부 서버가 한다.** 낱말 하나는 열한 자리 중 어디에 있어도 되고
+ * (OR), 낱말끼리는 전부여야 한다(AND). 예전처럼 앞 겹과 뒤 겹이 각자 AND 를
+ * 따지면, 제목에만 있는 낱말과 메모에만 있는 낱말을 함께 친 순간 양쪽 다
+ * 떨어뜨려 0건이 된다.
+ *
+ * 화면이 그 자리에서 하는 즉시 거르기는 이 답의 **부분집합**이다 — 앞 칸
+ * 여덟만으로 낱말이 다 맞는 논문은 열한 자리로도 다 맞는다. 그래서 즉시
+ * 떴다가 답이 오면서 사라지는 줄은 없다. **목록은 늘어나기만 한다.**
+ *
+ * `paperId` 만 오는 것은 논문의 나머지를 화면이 이미 들고 있기 때문이다.
+ * **`groups` 에서 그 id 를 못 찾으면 그 줄은 버려라** — 폴링과 이 요청 사이에
+ * 지워진 논문이다.
+ */
+export interface SearchHit {
+  paperId: string;
+  /** 이 논문에서 맞은 자리 전부. 앞 칸과 깊은 칸이 섞여 온다. */
+  where: SearchWhere[];
+  /**
+   * 깊은 자리에서 맞았을 때만. 자리마다 최대 하나(그러니 최대 셋).
+   *
+   * **`where` 에 있다고 조각이 따라오는 것은 아니다.** 쪽 표시밖에 없는
+   * 자리처럼 다듬고 나면 한 글자도 안 남는 창이 있어서, 그때는 딱지만 가고
+   * 조각은 안 간다. 조각은 `where` 가 아니라 이 배열에서 찾아라.
+   */
+  snippets: { where: DeepWhere; text: string }[];
+}
+
+export interface SearchResponse {
+  hits: SearchHit[];
+  /** 낱말이 상한(16)을 넘어 **아예 안 찾았다.** `hits` 는 비어 있다. */
+  tooManyWords?: boolean;
+  /** 결과가 상한(200)에서 잘렸다. 걸린 논문이 더 있다. */
+  truncated?: boolean;
+  /** 질의가 길어 앞 `SEARCH_MAX_QUERY` 자로 자른 뒤 찾았다. */
+  queryTruncated?: boolean;
+}
+
+/**
+ * 한 번에 물을 수 있는 질의 길이.
+ *
+ * **주소에 싣기 전에 여기서 자른다.** 안 자르면 조금 긴 글을 붙여 넣는 것만으로
+ * 요청이 431 로 죽는다 — 한글 한 글자가 `%XX` 세 벌(9자)로 부풀어 1,800자쯤에서
+ * 헤더 한도를 넘는다. 라우트도 자르지만 그건 주소가 이미 닿은 **뒤**라 431 은
+ * 거기까지 가지도 못한다. 그래서 두 곳에서 자르고, **라우트는 이 길이가 아니라
+ * 아래 `clipQuery` 를 통째로 가져다 쓴다** — 길이만 나눠 가지면 자르는 자리가
+ * 갈리고, 그 갈림이 바로 결함이었다.
+ *
+ * 잘랐다는 것은 `queryTruncated` 로 말한다. 조용히 자르면 사람은 자기가 친
+ * 글 전부로 찾은 목록이라고 읽는다.
+ */
+export const SEARCH_MAX_QUERY = 200;
+
+/**
+ * 질의를 상한 안으로 줄인다. **낱말 사이에서만 자른다.**
+ *
+ * 예전에는 `slice(0, SEARCH_MAX_QUERY)` 였다. UTF-16 칸으로 자르니 **글자
+ * 한가운데**가 갈렸다 — 조합형 한글(NFD)이나 악센트는 한 글자가 두세 칸이고
+ * 이모지는 서로게이트 쌍이다. 갈린 반쪽은 접고 나면 저장값 어디에도 없는
+ * 글자가 되므로 서버는 0건을 내놓는데, 화면은 안 자른 질의로 이미 줄을 띄워
+ * 놓았다. **그 줄이 사라진다.** 맥에서 복사한 조합형 한글은 음절 하나가 두세
+ * 칸이라 94글자 문장이 250칸이 되고, 낱말 열 개짜리 흔한 초록 한 문장이 그
+ * 길로 들어간다. (`"x"×199 + é(NFD)` 하나로 재현된다.)
+ *
+ * 낱말 사이에서 자르면 이 갈래가 통째로 없어진다. 질의는 어차피 공백으로
+ * 나뉘므로(`queryWords`) 남는 것은 **사람이 친 낱말 그대로**이고, 접힌 값도
+ * 그대로다. 서버가 보는 낱말이 화면이 보는 낱말의 부분집합이 되니 부분집합
+ * 성질도 지켜진다 — 낱말이 줄면 서버 쪽이 **넓게** 맞을 뿐이다.
+ *
+ * **낱말 하나가 통째로 상한을 넘으면 그 낱말부터 버린다.** 첫 낱말이 그러면
+ * 빈 질의가 된다. 낱말 안에서는 안전하게 자를 자리가 없기 때문이다: 어디서
+ * 자르든 남는 앞부분이 저장값에 그대로 있으리라는 보장이 없다(`강`(NFD)을
+ * 반만 남기면 `가`가 되고, 저장값의 `강` 은 그 `가` 를 안 품는다). 자르면
+ * 부분집합이 깨지고, 안 자르면 431 로 요청 자체가 죽는다. 그래서 버린다 —
+ * 대신 `queryTruncated` 가 서고, 화면은 그때 즉시 거르기의 줄을 그대로 둔다
+ * (`search-panel.tsx` 의 `cut`). 200자를 넘는 낱말 하나짜리 질의는 요약·메모·
+ * PDF 본문까지는 못 뒤지지만, 앞 칸 여덟으로 찾은 줄은 그대로 보인다.
+ *
+ * 나누는 자리는 `rawQueryWords` 다 — 공백으로 그냥 나누면 안 된다. 접기가
+ * **낱말 안으로 치는** 두 가지가 있어서다: 줄 끝 하이픈(`trans-\nformer` 는 한
+ * 낱말)과 안 보이는 글자(U+FEFF 는 `\s` 에 들어 있다). 거기서 나누면 서버가
+ * `trans-` 나 `mo` 처럼 **사람이 친 적 없는 낱말**로 찾게 된다.
+ *
+ * 넘칠 때만 낱말로 다시 잇는다(공백이 하나로 접힌다). 상한 안이면 사람이 친
+ * 글자를 앞뒤 공백만 떼고 그대로 돌려준다.
+ */
+export function clipQuery(query: string): string {
+  const asked = query.trim();
+  if (asked.length <= SEARCH_MAX_QUERY) return asked;
+
+  const kept: string[] = [];
+  let len = 0;
+  for (const w of rawQueryWords(asked)) {
+    const add = (kept.length === 0 ? 0 : 1) + w.length;
+    if (len + add > SEARCH_MAX_QUERY) break;
+    kept.push(w);
+    len += add;
+  }
+  return kept.join(" ");
+}
+
 export const api = {
   list: () => mutate("/api/groups", { method: "GET" }),
 
@@ -257,6 +415,70 @@ export const api = {
     return { candidates: json.candidates ?? [], steps: json.steps ?? [] };
   },
 
+  // ── 찾기 ────────────────────────────────────────────────
+  /**
+   * 서재에서 찾는다. **판정은 서버가 한다** — 열한 자리를 한꺼번에 본다.
+   *
+   * 인자 이름이 `query` 인 데는 이유가 있다. 이 모듈에는
+   * `const q = (s) => encodeURIComponent(s)` 가 있어서 인자를 `q` 로 받으면
+   * **그 인코더가 문자열에 가려진다.** 그러면 `q(query)` 가 "문자열을 부르려
+   * 했다" 로 터진다. 다른 곳(`lookup`)이 같은 이름으로 가리고 있는데 거기서는
+   * 인코더를 안 써서 아직 안 드러났을 뿐이다.
+   *
+   * `signal` 은 `send()` 가 `init` 을 그대로 `fetch` 로 펼치므로 그냥 통한다.
+   * 사람이 한 글자 칠 때마다 부르는 자리라, **먼저 보낸 요청을 끊지 않으면
+   * 늦게 도착한 옛 답이 새 답을 덮는다.** 부르는 쪽이 반드시 실어 보내라.
+   *
+   * 질의가 비면 아예 안 부른다. 서버도 빈 결과를 주지만, 글자를 다 지운 순간
+   * 오갈 이유가 없는 요청 하나가 나가는 것을 여기서 막는다.
+   *
+   * 답을 벗기지 않고 `SearchResponse` 를 그대로 돌려준다. `hits` 말고도
+   * "낱말이 너무 많다" · "결과가 잘렸다" · "질의를 잘랐다" 가 함께 오고,
+   * 그건 화면이 사람에게 해 줘야 하는 말이다.
+   *
+   * **질의는 사람이 친 그대로 넘겨라.** 접기는 서버가 화면과 같은 규칙
+   * (`normalizeForSearch`)으로 맡는다. 미리 눕혀(소문자 · NFC) 보내면 서버가
+   * 사람이 친 글자를 못 보게 되고, 잘랐다는 말과 낱말 수는 사람이 친 것
+   * 기준이어야 한다. 여기서 손대는 것은 앞뒤 공백과 길이뿐이다.
+   *
+   * **"두 번 접어도 같으니 상관없다" 고 생각하지 마라 — 같지 않다.** 유니코드
+   * 전체를 한 번 훑어 재 보면 두 번 접은 값이 달라지는 자리가 여섯 있다
+   * (`Α` + U+0342 처럼 그리스 결합 기호가 붙은 꼴; NFC 뒤에 소문자를 씌우면
+   * 결과가 NFC 가 아니게 되어 다음 판에 또 바뀐다). 지금 규칙에서 그것이
+   * 문제가 안 되는 이유는 멱등이라서가 아니라 **양쪽이 원본을 딱 한 번씩만
+   * 접기 때문**이다. 그러니 어느 쪽에든 접기를 한 겹 더 얹지 마라.
+   */
+  search: async (
+    query: string,
+    init?: { signal?: AbortSignal },
+  ): Promise<SearchResponse> => {
+    const asked = query.trim();
+    if (!asked) return { hits: [] };
+
+    /*
+     * **주소에 싣기 전에 자른다.** 여기서 안 자르면 431 이고, 431 은 서버
+     * 코드가 한 줄도 안 돌고 나므로 "잘랐다" 는 말조차 할 수 없다.
+     * 자르는 자리는 낱말 사이다 — 왜인지는 `clipQuery` 에 적어 뒀다.
+     */
+    const sent = clipQuery(asked);
+
+    /*
+     * 낱말 하나가 통째로 상한을 넘어 남는 것이 없으면 **부르지 않는다.**
+     * 서버도 빈 질의에는 빈 결과를 주지만, 답이 뻔한 요청 하나가 사람이
+     * 글자를 칠 때마다 나가는 것을 여기서 막는다. 잘랐다는 말은 그대로 한다.
+     */
+    if (!sent) return { hits: [], queryTruncated: true };
+
+    const json = await send<Partial<SearchResponse>>(`/api/search?q=${q(sent)}`, init);
+    return {
+      hits: json.hits ?? [],
+      tooManyWords: json.tooManyWords,
+      truncated: json.truncated,
+      // 라우트도 자르지만(주소를 손으로 친 경우), 여기서 자른 것은 서버가 모른다.
+      queryTruncated: json.queryTruncated || sent !== asked,
+    };
+  },
+
   // ── 서지정보 제안 ───────────────────────────────────────
   /**
    * 에이전트에게 빈 칸을 맡긴다. **찾아오기가 먼저 돈 뒤에 부른다.**
@@ -305,6 +527,61 @@ export const api = {
         `/api/papers/${q(paperId)}/suggest`,
         jsonInit("PATCH", { id: suggestionId, applied: true }),
       ).then(() => undefined),
+  },
+
+  // ── 논문 대화 ───────────────────────────────────────────
+  /**
+   * 이 논문을 두고 나누는 대화. **논문마다 따로 이어진다.**
+   *
+   * 서재 머리말의 채팅창(`/api/agent/chat`)과 길이 다르다. 저쪽은 Discord 와
+   * 공유하는 세션 하나를 보고, 이쪽은 `paperId` 로 갈린 세션을 본다. 주소가
+   * `/api/papers/:id/chat` 인 것이 곧 그 뜻이다 — 논문에 딸린 대화다.
+   *
+   * 여기서도 **논문은 바뀌지 않는다.** 이 함수들이 건드리는 것은 대화뿐이고,
+   * 서지정보·요약·앵커 메모는 사람이 화면에서 저장할 때만 바뀐다.
+   */
+  paperChat: {
+    /**
+     * 지난 대화와 "지금 부를 수 있는가" 를 한 번에 받는다.
+     *
+     * 둘을 따로 묻지 않는 이유는 대화창이 열릴 때 둘 다 필요하기 때문이다.
+     * 못 부르는 이유는 서버가 문장으로 준다 — 화면이 짐작해 적으면 진짜
+     * 이유(환경변수가 없다 / 안 떠 있다)가 어디에도 안 나온다.
+     */
+    history: (paperId: string): Promise<PaperChatHistory> =>
+      send<PaperChatHistory>(`/api/papers/${q(paperId)}/chat?history=1`),
+
+    /**
+     * 시작만 시키고 번호를 받는다. 끝은 `status` 로 물어본다.
+     *
+     * `context` 는 계약에 있는 칸이지만 지금 화면은 안 싣는다 — 자세한 것은
+     * 프록시 라우트의 `bodySchema` 주석에 적었다.
+     */
+    send: async (
+      paperId: string,
+      message: string,
+      context?: string,
+    ): Promise<{ id: string | null }> => {
+      const json = await send<{ id?: string }>(
+        `/api/papers/${q(paperId)}/chat`,
+        jsonInit("POST", { message, ...(context ? { context } : {}) }),
+      );
+      return { id: json.id ?? null };
+    },
+
+    /**
+     * 진행 상황. 없는 작업이면 404 로 온다 — 부르는 쪽이 `HttpError.status`
+     * 로 알아보고 기록을 다시 읽는다.
+     *
+     * `signal` 을 받는다. 대화를 지우거나 화면을 떠날 때 돌던 폴링을 끊어야
+     * 늦게 온 답이 없는 대화에 끼어들지 않는다.
+     */
+    status: (paperId: string, job: string, signal?: AbortSignal): Promise<PaperChatStatus> =>
+      send<PaperChatStatus>(`/api/papers/${q(paperId)}/chat?job=${q(job)}`, { signal }),
+
+    /** 이 논문의 대화만 버린다. 다른 논문과 Discord 쪽 맥락은 그대로다. */
+    reset: (paperId: string): Promise<void> =>
+      send<unknown>(`/api/papers/${q(paperId)}/chat`, { method: "DELETE" }).then(() => undefined),
   },
 
   // ── 요약 ────────────────────────────────────────────────

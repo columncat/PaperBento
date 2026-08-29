@@ -18,7 +18,17 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { env } from "../env";
 import * as schema from "./schema";
 
-type DB = BetterSQLite3Database<typeof schema>;
+/*
+ * `$client` 를 타입에 남긴다. drizzle 이 실제로 붙여 주는 값인데
+ * (`drizzle-orm/better-sqlite3/driver.js` 의 `db.$client = client`) 이 별칭이
+ * 그것을 지워 버리고 있었다. 밑의 better-sqlite3 연결에 닿는 유일한 길이고,
+ * 찾기가 그 길을 쓴다 — `search-index.ts` 는 서재가 바뀌었는지 보려고
+ * `total_changes()` 와 `pragma data_version` 을 읽고, `search.ts` 는 조각 창을
+ * 뜨는 문장을 한 번 `prepare` 해 두고 계속 쓴다. 둘 다 drizzle 을 거쳐서는 할
+ * 수 없다. 아래 프록시는 함수가 아닌 값을 그대로 넘겨주므로 `db.$client` 는
+ * 진짜 연결 그대로다.
+ */
+type DB = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 /**
  * 지연 초기화 — DB 연결/마이그레이션은 첫 쿼리(런타임) 때 1회만 수행한다.

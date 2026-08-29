@@ -8,6 +8,8 @@ import {
   ExternalLink,
   Eye,
   Loader2,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Sparkles,
   X,
@@ -37,6 +39,7 @@ import { cn, formatDateTime } from "@/lib/utils";
 import { ExportMenu } from "./export-menu";
 import { NoteEditor, type NoteEditorTarget } from "./note-editor";
 import { NoteList } from "./note-list";
+import { PaperChat } from "./paper-chat";
 import { MarkPicker, ReadStateButton } from "./paper-mark";
 import { PaperSheet, type SheetTarget } from "./paper-sheet";
 import { PdfFrame } from "./pdf-frame";
@@ -80,6 +83,19 @@ import { SummaryRun } from "./summary-run";
  * 갈라 두지 않으면 여기서 끈 폭이 옆 앱의 칸막이를 움직인다.
  */
 const SPLIT_KEY = "paperbento.paperSplit";
+
+/*
+ * 글 쪽(대화·요약·메모)을 접어 두었는가.
+ *
+ * `preferences.ts` 의 `STORAGE_KEYS` 에 넣지 않았다. 그 표는 앱 전체에 뜻이
+ * 있는 값(테마·모드·열 개수)의 자리이고, 이 값은 **이 화면 밖에서는 아무
+ * 뜻이 없다.** 바로 위 `SPLIT_KEY` 와 `cite-copy.tsx` 의 스타일 키가 같은
+ * 이유로 제 화면 옆에 산다. 지키는 결은 그 표와 똑같다 — `paperbento.`
+ * 접두어(한 오리진에 `/paper` 와 `/memo` 가 함께 얹힌다), 마운트 **뒤에**
+ * 읽기(서버에는 localStorage 가 없어 그릴 때 읽으면 하이드레이션이 어긋난다),
+ * 읽고 쓰는 자리마다 try/catch(사생활 보호 모드에서 던진다).
+ */
+const COLLAPSE_KEY = "paperbento.paperTextCollapsed";
 
 /**
  * 뷰어는 이 화면에 들어올 때 비로소 받아 온다.
@@ -153,6 +169,34 @@ export function PaperDetail({
   const [savingNote, setSavingNote] = useState(false);
   /** 뷰어가 못 떴다. 브라우저 기본 보기로 물러난다. */
   const [viewerFailed, setViewerFailed] = useState(false);
+
+  /*
+   * 글 쪽을 접었는가. 접으면 원문이 화면을 다 쓴다.
+   *
+   * 첫 그림은 늘 "펴짐" 이고 기억해 둔 값은 붙은 뒤에 읽는다 — 서버가 그린
+   * 것과 달라지면 하이드레이션이 어긋난다(`split-pane.tsx` 가 비율을 그렇게
+   * 읽는다).
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(COLLAPSE_KEY) === "1") setCollapsed(true);
+    } catch {
+      /* 사생활 보호 모드 등 — 펴진 채로 산다 */
+    }
+  }, []);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* 못 적어도 이번 화면에서는 잘 돌아간다 */
+      }
+      return next;
+    });
+  }, []);
 
   const pdfRef = useRef<PdfViewHandle>(null);
   /** 원문 칸의 상자. 적기 상자를 띄울 자리를 못 구했을 때 여기 한복판에 띄운다. */
@@ -367,6 +411,41 @@ export function PaperDetail({
                 : "원본 서지정보가 없어 적어 둔 칸으로 만듭니다. 서지정보 찾기를 한 번 돌리면 더 온전해집니다."
             }
           />
+
+          {/*
+            글 쪽 접기.
+
+            머리말에 둔다 — **접힌 상태에서도 보여야 하기 때문이다.** 요약
+            카드 머리말에 얹으면 접는 순간 그 단추가 함께 사라져 다시 펼 길이
+            없어진다. 오른쪽 끝에 두어 자리와 뜻을 맞췄다: 이 단추 아래에
+            있는 칸이 접히는 칸이다.
+
+            켜짐/꺼짐을 색으로만 가르지 않는다. 글자("접기"/"펴기")와 아이콘
+            방향이 함께 바뀌고, 낭독기에는 `aria-pressed` 로 간다.
+          */}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-pressed={collapsed}
+            title={
+              collapsed
+                ? "요약·메모 칸을 다시 펼칩니다"
+                : "요약·메모 칸을 접고 원문만 크게 봅니다"
+            }
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ring-1 transition",
+              collapsed
+                ? "bg-(--color-accent-soft) text-(--color-accent-strong) ring-(--color-accent)/40 hover:bg-(--color-accent)/25"
+                : "bg-(--color-surface) text-(--color-fg-2) ring-(--color-border-soft) hover:bg-(--color-surface-2)",
+            )}
+          >
+            {collapsed ? (
+              <PanelRightOpen className="h-3.5 w-3.5" />
+            ) : (
+              <PanelRightClose className="h-3.5 w-3.5" />
+            )}
+            {collapsed ? "글 펴기" : "글 접기"}
+          </button>
         </div>
       </header>
 
@@ -377,9 +456,21 @@ export function PaperDetail({
 
         좁아지면(xl 미만) 칸막이가 사라지고 위아래로 쌓이는데, 그때는 **글이
         먼저**다 — 원문은 세로로 길어서 위에 놓으면 요약을 보려고 한참 굴려야 한다.
+
+        접으면 글 쪽이 통째로 감춰지고 원문이 남은 자리를 다 쓴다. **좁은
+        화면에서도 같은 뜻이다** — 거기서는 폭이 아니라 위에 얹힌 글 더미가
+        사라지고, 원문 칸의 높이는 `h-[calc(100vh-8rem)]` 라 그대로 화면을
+        채운다. 넓은 화면에서만 되는 기능으로 두지 않은 것은, 화면이 좁을수록
+        "원문만 보고 싶다" 가 더 자주 생기기 때문이다.
+
+        바깥 `max-w-[1600px]` 은 접어도 그대로다. 상한을 풀면 첫 배율
+        (`page-width`)이 화면 폭을 따라가서 넓은 모니터에서는 한 쪽이 읽기
+        어려울 만큼 커지고, 그리는 캔버스도 pdf.js 의 넓이 상한에 다가간다.
+        58% → 100% 만으로 이미 원문이 두 배 가까이 넓어진다.
       */}
       <SplitPane
         className="flex-1"
+        collapsed={collapsed}
         storageKey={SPLIT_KEY}
         defaultRatio={0.58}
         minRatio={0.3}
@@ -438,6 +529,19 @@ export function PaperDetail({
         }
         right={
           <>
+          {/*
+            대화. **요약 위에 둔다.**
+
+            묻는 것이 먼저이고 요약은 그 결과를 적어 두는 자리다. 아래에 두면
+            요약이 긴 논문에서 화면 밖으로 밀려 나가 있는 줄도 모르게 된다 —
+            인용문 상자를 초록 앞에 둔 것과 같은 이유다.
+
+            요약 카드 머리말에 얹지 않았다. 저 줄에는 이미 단추가 다섯이라
+            여섯째를 얹으면 무엇이 무엇인지 알 수 없다. 대화는 자기 카드를
+            가질 만큼 큰 일이다.
+          */}
+          <PaperChat paperId={paper.id} paperTitle={paper.title} />
+
           {/* 요약 */}
           <section className="flex min-h-[260px] flex-col rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
             <header className="mb-3 flex items-center justify-between gap-2">

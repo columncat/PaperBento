@@ -1,15 +1,10 @@
 "use client";
 
-import { AlertTriangle, Check, FileText, Loader2, Search, Sparkles, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, RotateCcw, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  api,
-  type BiblioClue,
-  type BiblioGuess,
-  type PaperInput,
-} from "@/lib/client-api";
+import { api, type BiblioGuess, type PaperInput } from "@/lib/client-api";
 import {
   coverUrl,
   formatBytes,
@@ -21,6 +16,14 @@ import {
   type PaperDTO,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+import {
+  askAgent,
+  clueOf,
+  fillOne,
+  lookupable,
+  type BiblioPrefill,
+} from "./biblio-batch";
 
 /**
  * 논문 등록·편집 시트.
@@ -38,22 +41,32 @@ import { cn } from "@/lib/utils";
  * 같은 논문을 두 서가에 두고 싶은 날이 오고, 에이전트가 틀린 DOI 를 제안하는
  * 날도 온다. 저장이 "제약 위반" 으로 죽는 것보다 알려 주고 맡기는 편이 낫다.
  *
- * ## 빈 칸은 두 곳에서 온다 — 그리고 순서가 있다
+ * ## 값은 두 곳에서 온다 — 그리고 순서가 있다
  *
  * 1. **찾아오기** — doi.org·arXiv·Crossref 가 준 값. 정확한 것이다.
  * 2. **에이전트** — 모델이 PDF 앞부분을 읽고 짐작한 값. 추측이다.
  *
- * 늘 1이 먼저 돌고, 찾은 것을 **단서로 넘겨** 2가 남은 빈 칸만 메운다. 순서를
+ * 늘 1이 먼저 돌고, 찾은 것을 **단서로 넘겨** 2가 남은 칸을 메운다. 순서를
  * 뒤집으면 같은 칸에 두 값이 서로 다르게 앉고, 그때부터는 어느 쪽이 맞는지
- * 사람이 가려야 한다. 넘기지 않아도 될 일을 넘기는 것이다.
+ * 사람이 가려야 한다. 넘기지 않아도 될 일을 넘기는 것이다. 차례 자체는
+ * `biblio-batch.tsx` 의 `fillOne` 에 있다 — 시트도 배치도 그것을 부른다.
  *
- * 그래서 **화면에서도 둘이 같아 보이면 안 된다.** 이름표 옆 딱지(`OriginBadge`)와
- * 칸 밑 줄(`SuggestRow`)이 출처를 말하고, 추측 쪽은 점선으로 눌러 그린다. 한
- * 칸을 둘 다 들고 있으면 등록기관 쪽만 보여 준다 — 둘 중 하나를 고르는 일을
- * 없애려고 찾아오기를 먼저 돌린 것이니, 화면에서 그 일을 다시 만들면 안 된다.
+ * 그래서 **화면에서도 둘이 같아 보이면 안 된다.** 이름표 옆 딱지(`OriginBadge`)가
+ * 그 칸의 값이 어디서 왔는지 말하고, 추측 쪽은 점선으로 눌러 그린다.
  *
- * 적용 규칙은 두 출처가 같다. **이미 적어 둔 칸은 안 덮고**, 저장과 "전부 적용"
- * 이 같은 함수(`mergeSuggestions`)를 쓴다.
+ * ## 채우기는 **단추 하나**이고, 누르면 **덮어쓴다**
+ *
+ * 예전에는 체크박스였고 빈 칸만 채웠다. 지금은 시트 제일 위의 단추다. 누르면
+ * 적어 둔 값이 있어도 덮는다 — "채워 달라" 고 누른 사람에게 "몇 칸은 안 채웠다"
+ * 를 돌려주는 것이 더 나쁘고, 어느 칸이 덮였는지는 딱지와 **되돌리기** 한 번으로
+ * 되짚을 수 있기 때문이다.
+ *
+ * 열 때 저절로 도는 것은 **없다.** 단추가 방아쇠인데 저절로 도는 길이 남아
+ * 있으면, 서지정보를 손으로 고치려고 시트를 연 사람의 값이 소리 없이 덮인다.
+ *
+ * 그리고 값이 앉는 곳은 **칸(React 상태)뿐이다.** 논문이 바뀌는 것은 사람이
+ * 저장을 누른 그 한 번이다 (`onSubmit`). 그래서 덮어쓴 뒤에도 고치거나 그냥
+ * 닫아 버릴 수 있다.
  */
 
 export interface SheetTarget {
@@ -65,6 +78,14 @@ export interface SheetTarget {
   groupId: string;
   /** 방금 올라온 것인가. 문구만 "등록" 으로 바꾼다. */
   fresh?: boolean;
+  /**
+   * 배치가 미리 돌아 둔 결과. 있으면 **열자마자 칸에 앉힌다.**
+   *
+   * 저절로 덮는 유일한 자리인데, 그래도 되는 이유는 사람이 이미 "N편 모두
+   * 채워라" 를 눌렀기 때문이다. 그 동의가 이 값에 실려 온다. 되돌리기와 출처
+   * 딱지는 여기서도 똑같이 붙는다.
+   */
+  prefill?: BiblioPrefill;
 }
 
 /** 시트가 다루는 칸들. `PaperInput` 에서 화면이 안 건드리는 것을 뺀 것. */
@@ -131,36 +152,60 @@ const AGENT_KEYS = [
   "arxivId",
   "abstract",
 ] as const;
-type AgentKey = (typeof AGENT_KEYS)[number];
+/** 어느 칸이 이번 채우기로 앉았고 어디서 왔는가. */
+type Marks = Partial<Record<SuggestKey, Origin>>;
 
-/** 찾아오기가 쓸 재료가 있는가. 없으면 부를 것도 없다. */
-function lookupable(f: Fields): boolean {
-  return (
-    Boolean(f.doi?.trim()) ||
-    Boolean(f.arxivId?.trim()) ||
-    (f.title?.trim().length ?? 0) >= 4
-  );
+/** 비어 있는 값인가. 제안 쪽에만 쓴다 — **칸이 비었는지는 이제 묻지 않는다.** */
+function blank(v: unknown): boolean {
+  return v === null || v === undefined || String(v).trim() === "";
 }
 
-/** 채울 빈 칸이 하나라도 있는가. 없으면 에이전트를 부르지 않는다. */
-function hasBlank(f: Fields): boolean {
-  return SUGGEST_KEYS.some((k) => {
-    const v = f[k];
-    return v === null || v === undefined || String(v).trim() === "";
-  });
+/**
+ * 찾아온 후보를 칸에 눕힌다. **적혀 있던 값은 덮는다.**
+ *
+ * `csl` 원본을 함께 싣는 것은 이 후보에서 온 칸들과 한 대입에서 세우기
+ * 위해서다 — 한 후보의 값과 다른 후보의 원본이 섞이면 BibTeX 내보내기가
+ * 어긋난 레코드를 낸다.
+ */
+function foundPatch(c: LookupResult): { patch: Partial<Fields>; marks: Marks } {
+  const patch: Record<string, unknown> = { csl: JSON.stringify(c.csl) };
+  const marks: Marks = {};
+  for (const k of SUGGEST_KEYS) {
+    const v = c.fields[k];
+    // 후보가 안 들고 있는 칸까지 빈 값으로 덮지는 않는다. 그건 "찾아온 값" 이
+    // 아니라 "찾아온 것이 없다" 이고, 사람이 적어 둔 값을 지울 이유가 없다.
+    if (blank(v)) continue;
+    patch[k] = v;
+    marks[k] = "lookup";
+  }
+  return { patch: patch as Partial<Fields>, marks };
 }
 
-/** 찾아온 후보를 에이전트에게 넘길 단서로 눕힌다. */
-function clueOf(r: LookupResult): BiblioClue {
-  return { source: r.source, ...r.fields };
+/**
+ * 에이전트 추측을 칸에 눕힌다.
+ *
+ * **등록기관이 든 칸은 건드리지 않는다.** 정확한 것이 있는데 추측으로 덮으면
+ * 찾아오기를 먼저 돌린 이유가 없어진다.
+ *
+ * **`csl` 은 붙이지 않는다** — 키를 아예 넣지 않는다(`null` 도 아니다). 원본
+ * 없는 값이 원본이 있는 척하면 내보내기가 근거 없는 레코드를 내고, 여기서
+ * `csl: null` 을 실으면 애써 받아 둔 원본을 저장 한 번으로 지운다.
+ */
+function guessPatch(
+  g: BiblioGuess,
+  from: LookupResult | null,
+): { patch: Partial<Fields>; marks: Marks } {
+  const patch: Record<string, unknown> = {};
+  const marks: Marks = {};
+  for (const k of AGENT_KEYS) {
+    if (from && !blank(from.fields[k])) continue;
+    const v = g[k];
+    if (blank(v)) continue;
+    patch[k] = v;
+    marks[k] = "agent";
+  }
+  return { patch: patch as Partial<Fields>, marks };
 }
-
-/** 폴링 간격. 더 짧게 물어봐도 답이 빨리 나오지는 않는다. */
-const POLL_MS = 2500;
-/** 이만큼 물어보고도 안 끝나면 접는다. 서버도 6분에서 실패로 접는다. */
-const MAX_POLLS = 160;
-
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const EMPTY: Fields = {
   title: "",
@@ -234,12 +279,38 @@ export function PaperSheet({
    * 주면 틀린 논문의 서지정보를 확정된 값이라고 모델에게 알려 주는 셈이다.
    */
   const [agent, setAgent] = useState<{ ready: boolean; reason: string | null } | null>(null);
-  const [agentOn, setAgentOn] = useState(false);
   const [agentBusy, setAgentBusy] = useState<null | "lookup" | "agent">(null);
   const [pendingPick, setPendingPick] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [guess, setGuess] = useState<BiblioGuess | null>(null);
   const [guessId, setGuessId] = useState<string | null>(null);
+
+  /*
+   * 덮어쓰기의 뒷정리.
+   *
+   * `marks` 는 이번 채우기가 앉힌 칸과 그 출처다. 이름표 옆 딱지가 여기서 온다 —
+   * 값이 회색 미리보기가 아니라 **진짜로 칸에 들어앉기 때문에**, 무엇이 내가 적은
+   * 값이고 무엇이 방금 덮인 값인지는 화면이 말해 주지 않으면 알 길이 없다.
+   *
+   * `undoTo` 는 채우기가 시작되기 **직전의 한 벌**이다. 되돌리기는 한 걸음이면
+   * 된다 — 칸마다 되돌리게 하면 그건 예전의 "칸마다 적용" 을 뒤집어 놓은 것일
+   * 뿐이고, 사람이 원하는 것은 "방금 그거 취소" 하나다.
+   *
+   * `guessUsed` 는 추측이 실제로 한 칸이라도 앉았는가다. 그때만 저장 뒤에
+   * "적용했다" 를 표시한다 — 안 쓴 것까지 적용으로 세면 기록이 거짓말을 한다.
+   */
+  const [marks, setMarks] = useState<Marks>({});
+  const [undoTo, setUndoTo] = useState<Fields | null>(null);
+  const [guessUsed, setGuessUsed] = useState(false);
+
+  /**
+   * 이 논문에 **이미 받아 둔 제안**이 있는가.
+   *
+   * 열 때 저절로 앉히지 않는다 — 덮어쓰기는 사람이 누른 뒤여야 한다. 다만
+   * 있다는 것은 말해 주고, 누르면 에이전트를 다시 부르지 않고 그것을 쓴다.
+   * 한 번 1분 넘게 기다린 것을 시트를 다시 열었다고 또 기다릴 이유가 없다.
+   */
+  const [stored, setStored] = useState<{ fields: BiblioGuess; id: string } | null>(null);
 
   /**
    * 지금 돌고 있는 것의 번호.
@@ -252,6 +323,15 @@ export function PaperSheet({
   const runSeq = useRef(0);
   useEffect(() => () => void runSeq.current++, []);
 
+  /**
+   * 여는 요청의 번호. **채우기 번호와 갈라 둔다.**
+   *
+   * 되돌리기는 돌고 있던 채우기를 버리려고 `runSeq` 를 올린다. 그 번호로 여는
+   * 요청까지 재면, 열자마자 되돌리기를 누른 사람에게는 "부를 수 있는가" 의 답이
+   * 영영 안 도착하고 단추가 꺼진 채로 남는다.
+   */
+  const openSeq = useRef(0);
+
   const paperId = target?.paper?.id ?? null;
   const hasPdf = Boolean(target?.paper?.file);
 
@@ -259,22 +339,64 @@ export function PaperSheet({
   // 그걸 그대로 저장해 버리는 사고가 난다.
   useEffect(() => {
     if (!target) return;
-    setFields(fieldsOf(target));
+    const base = fieldsOf(target);
     setGroupId(target.groupId);
     setDups([]);
-    // 앞 논문의 후보가 남아 있으면 남의 서지정보를 제안하게 된다.
-    setReport(null);
-    setPicked(null);
-    setLookupError(null);
-    setLookupBusy(false);
-    // 앞 논문의 추측이 남으면 남의 제목이 회색으로 들어가 있게 된다.
+    // 앞 논문의 것이 남아 있으면 남의 서지정보가 이 논문 칸에 앉는다.
     setAgent(null);
-    setAgentOn(false);
     setAgentBusy(null);
-    setPendingPick(false);
-    setAgentError(null);
-    setGuess(null);
-    setGuessId(null);
+    setStored(null);
+
+    const pre = target.prefill;
+    if (!pre) {
+      setFields(base);
+      setReport(null);
+      setPicked(null);
+      setLookupError(null);
+      setLookupBusy(false);
+      setPendingPick(false);
+      setAgentError(null);
+      setGuess(null);
+      setGuessId(null);
+      setMarks({});
+      setUndoTo(null);
+      setGuessUsed(false);
+    } else {
+      /*
+       * 배치가 미리 돌아 둔 것을 그대로 앉힌다.
+       *
+       * 앉히는 규칙은 단추를 눌렀을 때와 **같은 함수**다 — 두 벌로 적으면
+       * 배치로 채운 것과 손으로 채운 것이 다르게 앉는 날이 온다.
+       */
+      let next: Fields = base;
+      const m: Marks = {};
+      if (pre.picked) {
+        const r = foundPatch(pre.picked);
+        next = { ...next, ...r.patch };
+        Object.assign(m, r.marks);
+      }
+      let used = false;
+      if (pre.guess) {
+        const r = guessPatch(pre.guess, pre.picked);
+        next = { ...next, ...r.patch };
+        Object.assign(m, r.marks);
+        used = Object.keys(r.marks).length > 0;
+      }
+      setFields(next);
+      setMarks(m);
+      // 되돌리기는 늘 **열었을 때의 값**으로 간다.
+      setUndoTo(base);
+      setGuessUsed(used);
+      setReport(pre.report);
+      setPicked(pre.picked);
+      setLookupError(null);
+      setLookupBusy(false);
+      setPendingPick(Boolean(pre.pendingPick));
+      setAgentError(pre.error ?? null);
+      setGuess(pre.guess);
+      setGuessId(pre.guessId);
+    }
+
     // 방금 올린 것의 제목은 파일 이름에서 딴 짐작이라 거의 늘 고쳐야 한다.
     // 열자마자 통째로 골라 둔다 — 바로 덮어쓸 수 있게.
     queueMicrotask(() => titleRef.current?.select());
@@ -329,130 +451,14 @@ export function PaperSheet({
     [groups],
   );
 
-  // ── 찾아오기 → 에이전트 ────────────────────────────────────
+  // ── 채우기 ────────────────────────────────────────────────
 
   /**
-   * 세 칸을 **함께** 보낸다. 무엇으로 찾을지는 서버가 정한다 (DOI → arXiv → 제목).
+   * 시트가 열릴 때 한 번. **부를 수 있는가**와 **받아 둔 제안이 있는가**를 묻는다.
    *
-   * 사람에게 "어느 것으로 찾을까요" 를 묻지 않는 이유는, 물어봤자 답이 늘
-   * "있는 것으로" 이기 때문이다.
-   *
-   * 보고서를 그대로 돌려주는 것은 이어서 에이전트가 쓰기 때문이다. 상태에서
-   * 다시 읽으면 그 시점에는 아직 옛 값이다.
-   */
-  const doLookup = useCallback(async (base: Fields): Promise<LookupReport | null> => {
-    setLookupBusy(true);
-    setLookupError(null);
-    setReport(null);
-    setPicked(null);
-    try {
-      const r = await api.lookup({
-        doi: base.doi,
-        arxiv: base.arxivId,
-        title: base.title,
-      });
-      setReport(r);
-      // 후보가 하나뿐이면 고를 것이 없다. 바로 제안으로 편다.
-      if (r.candidates.length === 1) setPicked(r.candidates[0]);
-      return r;
-    } catch (e) {
-      setLookupError(e instanceof Error ? e.message : "찾아오기에 실패했습니다");
-      return null;
-    } finally {
-      setLookupBusy(false);
-    }
-  }, []);
-
-  /**
-   * 에이전트에게 남은 빈 칸을 맡긴다.
-   *
-   * `clue` 는 방금 찾아온 것이다. 없으면(아무것도 못 찾았을 때) PDF 글자만으로
-   * 간다 — 그때는 추측밖에 없으니 추측이라도 있는 편이 낫다.
-   *
-   * 시작만 시키고 몇 초마다 물어본다. 답까지 1분이 넘는 일이 흔한데, 요청을
-   * 붙들면 앞의 터널이 100초에서 끊는다.
-   */
-  const runAgent = useCallback(
-    async (clue: BiblioClue | null) => {
-      if (!paperId) return;
-      const seq = runSeq.current;
-      setPendingPick(false);
-      setAgentError(null);
-      setAgentBusy("agent");
-      try {
-        let row = await api.biblio.start(paperId, clue);
-        for (let i = 0; row && row.state === "running" && i < MAX_POLLS; i++) {
-          await wait(POLL_MS);
-          if (runSeq.current !== seq) return;
-          row = (await api.biblio.status(paperId, row.id)).suggestion;
-        }
-        if (runSeq.current !== seq) return;
-        if (!row || row.state === "running") {
-          setAgentError("에이전트가 제 시간에 끝내지 못했습니다");
-          return;
-        }
-        if (row.state === "failed") {
-          setAgentError(row.error ?? "에이전트가 서지정보를 뽑지 못했습니다");
-          return;
-        }
-        setGuess(row.fields);
-        setGuessId(row.id);
-      } catch (e) {
-        if (runSeq.current !== seq) return;
-        setAgentError(e instanceof Error ? e.message : "에이전트를 부르지 못했습니다");
-      } finally {
-        if (runSeq.current === seq) setAgentBusy(null);
-      }
-    },
-    [paperId],
-  );
-
-  /**
-   * **찾아오기가 먼저, 에이전트가 나중.** 이 순서가 이 기능의 전부다.
-   *
-   * 등록기관에서 받은 서지정보는 정확한 것이고, 모델이 PDF 를 읽어 짐작한 것은
-   * 추측이다. 정확한 것이 있는데 추측부터 시키면 같은 칸에 두 값이 서로 다르게
-   * 앉고, 그때부터는 어느 쪽이 맞는지 **사람이 가려야 한다.** 그건 넘기지
-   * 않아도 될 일을 넘기는 것이다.
-   *
-   * 그래서 찾아온 것을 단서로 함께 넘겨 남은 빈 칸만 메우게 한다.
-   *
-   * 후보가 여럿이면 **여기서 멈춘다.** 제목 검색은 1등이 맞다는 보장이 없는데,
-   * 우리가 골라 단서로 주면 틀린 논문의 서지정보를 "확정된 값" 이라고 모델에게
-   * 알려 주는 셈이 된다. 사람이 고르면 그때 이어서 돈다.
-   */
-  const startChain = useCallback(
-    async (base: Fields) => {
-      const seq = runSeq.current;
-      setAgentError(null);
-      setGuess(null);
-      setGuessId(null);
-      setPendingPick(false);
-
-      let clue: BiblioClue | null = null;
-      if (lookupable(base)) {
-        setAgentBusy("lookup");
-        const r = await doLookup(base);
-        if (runSeq.current !== seq) return;
-        setAgentBusy(null);
-        if (r && r.candidates.length > 1) {
-          setPendingPick(true);
-          return;
-        }
-        if (r && r.candidates.length === 1) clue = clueOf(r.candidates[0]);
-      }
-      await runAgent(clue);
-    },
-    [doLookup, runAgent],
-  );
-
-  /**
-   * 시트가 열릴 때 한 번.
-   *
-   * 한 번의 요청으로 **부를 수 있는가**와 **이미 받아 둔 제안이 있는가**를 함께
-   * 안다. 받아 둔 것이 있으면 그것을 쓴다 — 시트를 열 때마다 다시 부르면
-   * 값도 시간도 그냥 버리는 것이고, 같은 PDF 에서 다른 답이 나와 사람만
-   * 헷갈린다.
+   * 예전에는 여기서 조건이 맞으면 저절로 돌았다. 지금은 안 돈다 — 채우기가
+   * 단추가 된 뒤로는 열자마자 도는 길이 곧 "누르지도 않은 사람의 값이 덮인다"
+   * 가 된다. 받아 둔 제안도 앉히지 않고, 있다는 것만 말한다.
    */
   useEffect(() => {
     if (!target) {
@@ -461,262 +467,255 @@ export function PaperSheet({
       runSeq.current++;
       return;
     }
-    const seq = ++runSeq.current;
+    // 앞 논문의 채우기가 돌고 있었다면 그 답은 버린다.
+    runSeq.current++;
+    const seq = ++openSeq.current;
 
     if (!paperId || !hasPdf) {
-      // 읽을 PDF 가 없으면 에이전트가 할 일이 없다. 켜 두면 눌렀을 때
+      // 읽을 PDF 가 없으면 에이전트가 할 일이 없다. 단추를 살려 두면 눌렀을 때
       // "글자를 뽑지 못했습니다" 만 나온다.
       setAgent({
         ready: false,
-        reason: "PDF 가 붙은 논문에서만 됩니다. 파일을 올린 뒤에 켤 수 있습니다.",
+        reason: "PDF 가 붙은 논문에서만 됩니다. 파일을 올린 뒤에 누를 수 있습니다.",
       });
       return;
     }
 
-    const openFields = fieldsOf(target);
-    void (async () => {
-      const [state, config] = await Promise.all([
-        api.biblio.status(paperId).catch(() => null),
-        api.getConfig().catch(() => null),
-      ]);
-      if (runSeq.current !== seq) return;
-
-      if (!state) {
+    const prefilled = Boolean(target.prefill);
+    void api.biblio
+      .status(paperId)
+      .then((state) => {
+        if (openSeq.current !== seq) return;
+        setAgent(state.agent);
+        const done = state.suggestion;
+        // 배치가 방금 실어 보낸 것이 이미 칸에 앉아 있으면 같은 것을 두 번
+        // 말하지 않는다.
+        if (!prefilled && done?.state === "done" && done.fields) {
+          setStored({ fields: done.fields, id: done.id });
+        }
+      })
+      .catch(() => {
+        if (openSeq.current !== seq) return;
+        // "서버가 안 된다고 했다" 와 "물어보지도 못했다" 는 다른 일이다.
         setAgent({ ready: false, reason: "에이전트를 부를 수 있는지 확인하지 못했습니다" });
-        return;
-      }
-      setAgent(state.agent);
-
-      const done = state.suggestion;
-      if (done?.state === "done" && done.fields) {
-        setGuess(done.fields);
-        setGuessId(done.id);
-        setAgentOn(true);
-        /*
-         * 받아 둔 추측은 그때 **단서를 받고** 만들어진 것이다. 등록기관이 들고
-         * 있던 칸은 비워 두고 나머지만 채워져 있다. 그래서 찾아오기를 한 번 더
-         * 돌려 정확한 쪽을 되살린다 — 안 그러면 제목 칸이 통째로 비어 보이고,
-         * 화면에 남는 것은 추측뿐이라 이 기능의 순서가 거꾸로 보인다.
-         *
-         * 에이전트는 다시 부르지 않는다. 값도 시간도 드는 쪽은 그쪽이다.
-         */
-        if (hasBlank(openFields) && lookupable(openFields)) void doLookup(openFields);
-        return;
-      }
-
-      // 못 부르면 **켜지 않는다.** 켜 놓고 누를 때 실패하는 것보다,
-      // 왜 못 쓰는지 적힌 꺼진 토글이 낫다.
-      if (!state.agent.ready) return;
-      if (!config?.agentSuggestDefault) return;
-      // 채울 칸이 하나도 없으면 부를 이유가 없다. 에이전트는 빈 칸만 메운다.
-      if (!hasBlank(openFields)) return;
-
-      setAgentOn(true);
-      await startChain(openFields);
-    })();
-  }, [target, paperId, hasPdf, startChain, doLookup]);
+      });
+  }, [target, paperId, hasPdf]);
 
   if (!target) return null;
 
-  const set = <K extends keyof Fields>(k: K, v: Fields[K]) =>
+  const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
     setFields((f) => ({ ...f, [k]: v }));
+    /*
+     * 손댄 칸의 출처 딱지를 뗀다.
+     *
+     * 딱지는 "이 칸에 지금 앉아 있는 값이 어디서 왔는가" 다. 사람이 한 글자라도
+     * 고치면 그 값은 더 이상 등록기관의 것도 모델의 것도 아니다. 남겨 두면
+     * 자기가 적은 저자 이름에 "추측" 이 붙어 있게 된다.
+     */
+    setMarks((m) => {
+      if (!(k in m)) return m;
+      const next = { ...m };
+      delete next[k as SuggestKey];
+      return next;
+    });
+  };
 
   const canLookup = lookupable(fields);
+
+  /**
+   * 채우기 한 판의 시작.
+   *
+   * 하는 일은 **지금 값을 한 벌 붙드는 것**뿐이고, 이미 붙들어 둔 것이 있으면
+   * 그대로 둔다. 되돌릴 자리는 **처음 열었을 때** 하나다 — 채우기를 두 번
+   * 눌렀는데 한 걸음만 물러나면, 되돌리기가 사람이 본 적 없는 중간 상태로
+   * 데려가는 단추가 된다. 단계별 되감기를 원하는 사람은 없다.
+   */
+  const beginRun = () => setUndoTo((prev) => prev ?? fields);
+
+  /** 찾아온 후보를 칸에 앉힌다. **적어 둔 값도 덮는다.** */
+  const applyFound = (c: LookupResult) => {
+    const { patch, marks: m } = foundPatch(c);
+    setPicked(c);
+    setFields((f) => ({ ...f, ...patch }));
+    setMarks((prev) => ({ ...prev, ...m }));
+  };
+
+  /** 추측을 칸에 앉힌다. 등록기관이 든 칸은 건드리지 않는다. */
+  const applyGuess = (g: BiblioGuess, from: LookupResult | null) => {
+    const { patch, marks: m } = guessPatch(g, from);
+    setFields((f) => ({ ...f, ...patch }));
+    setMarks((prev) => ({ ...prev, ...m }));
+    if (Object.keys(m).length > 0) setGuessUsed(true);
+  };
+
+  /**
+   * 되돌리기.
+   *
+   * `csl` 까지 함께 돌아간다 — 붙들어 둔 한 벌에는 그 칸도 들어 있다(찾아오기
+   * 전이라면 없는 상태 그대로). 값만 되돌리고 원본을 남기면 사람이 보고 있는
+   * 칸과 내보내기가 갈라진다.
+   */
+  const undo = () => {
+    if (!undoTo) return;
+    // 아직 돌고 있는 것이 있으면 그 답도 버린다. 되돌린 칸에 1분 뒤 답이
+    // 날아와 앉으면 그건 되돌린 것이 아니다.
+    runSeq.current++;
+    setFields(undoTo);
+    setUndoTo(null);
+    setMarks({});
+    setGuessUsed(false);
+    setAgentBusy(null);
+    setPendingPick(false);
+  };
 
   /** 머리의 "찾아오기" 단추. 손으로 누를 때는 에이전트까지 끌고 가지 않는다. */
   const runLookup = async () => {
     if (lookupBusy || !canLookup) return;
-    await doLookup(fields);
-  };
-
-  /**
-   * 토글.
-   *
-   * 끄면 추측을 **치운다.** 회색으로 남겨 두면 저장할 때 그대로 딸려 들어가는데,
-   * 사람은 방금 "쓰지 않겠다" 고 말한 것이다.
-   */
-  const toggleAgent = (on: boolean) => {
-    setAgentOn(on);
-    if (!on) {
-      // 번호를 올려 돌고 있던 것의 답을 버린다.
-      runSeq.current++;
-      setAgentBusy(null);
-      setPendingPick(false);
-      setAgentError(null);
-      setGuess(null);
-      setGuessId(null);
-      return;
+    setLookupBusy(true);
+    setLookupError(null);
+    setReport(null);
+    setPicked(null);
+    // 찾아온 값도 곧바로 칸에 앉으므로 이것 역시 되돌릴 수 있어야 한다.
+    beginRun();
+    try {
+      const r = await api.lookup({
+        doi: fields.doi,
+        arxiv: fields.arxivId,
+        title: fields.title,
+      });
+      setReport(r);
+      // 후보가 하나뿐이면 고를 것이 없다. 바로 앉힌다.
+      if (r.candidates.length === 1) applyFound(r.candidates[0]);
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : "찾아오기에 실패했습니다");
+    } finally {
+      setLookupBusy(false);
     }
-    if (guess || agentBusy || pendingPick) return;
-    void startChain(fields);
-  };
-
-  /** 후보를 고르면 멈춰 있던 에이전트가 그 후보를 단서로 이어 돈다. */
-  const pick = (c: LookupResult) => {
-    setPicked(c);
-    if (pendingPick) void runAgent(clueOf(c));
-  };
-
-  const isBlank = (k: SuggestKey): boolean => {
-    const v = fields[k];
-    return v === null || v === undefined || String(v).trim() === "";
-  };
-
-  /** 찾아온 값. 없으면 undefined. */
-  const foundAt = (k: SuggestKey): string | number | undefined => {
-    const v = picked?.fields[k];
-    return v === null || v === undefined || String(v).trim() === "" ? undefined : v;
   };
 
   /**
-   * 에이전트가 짐작한 값. 없으면 undefined.
+   * 시트 제일 위의 단추 — **에이전트에게 채우게 하기.**
    *
-   * `url` 은 여기서 늘 없다 — `AGENT_KEYS` 를 보라. 주소는 등록기관이 준 것만 받는다.
+   * 차례는 `fillOne` 이 들고 있다. 여기서 하는 일은 그 결과를 칸에 앉히고,
+   * 어느 단계인지 화면에 말하는 것뿐이다.
+   *
+   * 후보가 여럿이면 `fillOne` 이 멈춰 서고 `pendingPick` 이 켜진다. 단추를
+   * 눌렀다고 해서 우리가 하나를 고를 수 있게 되는 것은 아니다 — 틀린 논문의
+   * 서지정보를 "확정된 값" 이라고 모델에게 알려 주게 된다. 고르면 `pick` 이
+   * 그 자리에서 이어 돈다.
    */
-  const guessAt = (k: SuggestKey): string | number | undefined => {
-    if (!guess) return undefined;
-    // 목록에 없는 칸은 없는 것으로 둔다. 서버도 허용목록으로 거르지만, 화면이
-    // 그걸 믿고 아무 키나 꺼내 쓰면 목록을 넓힐 때 여기가 조용히 따라 넓어진다.
-    const key: AgentKey | undefined = AGENT_KEYS.find((a) => a === k);
-    if (!key) return undefined;
-    const v = guess[key];
-    return v === null || v === undefined || String(v).trim() === "" ? undefined : v;
-  };
+  const fillAll = async () => {
+    if (!paperId || agentBusy || !agent?.ready) return;
+    const seq = ++runSeq.current;
+    const base = fields;
 
-  /**
-   * 그 칸에 회색으로 비쳐 보일 값과 그 **출처**.
-   *
-   * 등록기관이 먼저다. 정확한 것이 있는데 추측을 보여 줄 이유가 없다.
-   */
-  const ghostAt = (k: SuggestKey): { value: string; origin: Origin } | null => {
-    if (!isBlank(k)) return null;
-    const found = foundAt(k);
-    if (found !== undefined) return { value: String(found), origin: "lookup" };
-    const g = guessAt(k);
-    if (g !== undefined) return { value: String(g), origin: "agent" };
-    return null;
-  };
+    beginRun();
+    // 이 판이 다시 세울 것들. 앞 판의 후보와 추측이 남아 있으면 화면이 이번
+    // 결과와 지난 결과를 섞어 말한다.
+    setReport(null);
+    setPicked(null);
+    setLookupError(null);
+    setGuess(null);
+    setGuessId(null);
+    setGuessUsed(false);
+    setStored(null);
+    setAgentError(null);
+    setPendingPick(false);
+    setAgentBusy("lookup");
 
-  /**
-   * 한 칸에 값을 넣는다.
-   *
-   * 찾아온 값이면 **csl 원본도 함께 붙인다.** 원본은 마지막으로 무언가를 가져온
-   * 후보의 것이 된다. 두 후보에서 한 칸씩 집어 오면 원본과 우리 칸이 어긋날 수
-   * 있는데, 그래도 원본을 안 붙이는 것보다 낫다 — 내보낼 때 `toCSL` 이 사람이
-   * 고친 우리 칸을 위에 덮기 때문에, 어긋난 자리는 사람이 보고 있는 값으로
-   * 정리된다.
-   *
-   * **추측에는 원본을 붙이지 않는다.** 뒤에 원본이 없는 값이 원본이 있는 척하면
-   * BibTeX 내보내기가 근거 없는 레코드를 낸다.
-   */
-  const applyOne = (k: SuggestKey, origin: Origin) => {
-    if (origin === "lookup") {
-      if (!picked) return;
-      const v = foundAt(k);
-      if (v === undefined) return;
-      setFields((f) => ({ ...f, [k]: v, csl: JSON.stringify(picked.csl) }) as Fields);
-      return;
-    }
-    const v = guessAt(k);
-    if (v === undefined) return;
-    setFields((f) => ({ ...f, [k]: v }) as Fields);
-  };
-
-  /**
-   * 빈 칸에 제안을 채워 넣은 것을 돌려준다. **이미 적힌 칸은 건드리지 않는다.**
-   *
-   * "전부 적용" 과 저장이 **같은 함수를 쓴다.** 회색으로 보이던 값이 저장하면
-   * 사라지는 일이 없어야 하는데, 규칙을 두 벌로 적어 두면 한쪽만 고치는 날이 온다.
-   *
-   * 두 출처의 순서도 여기 한 곳에만 적혀 있다 — **등록기관이 먼저, 추측이 나중.**
-   * 화면이 회색으로 보여 주는 것(`ghostAt`)과 같은 순서라, 보이는 것과 저장되는
-   * 것이 갈라지지 않는다.
-   *
-   * `usedGuess` 는 추측이 실제로 한 칸이라도 쓰였는가다. 그때만 "적용했다" 는
-   * 표시를 남긴다 — 켜 두고 아무것도 안 쓴 것까지 적용으로 세면 기록이 거짓말을
-   * 한다.
-   */
-  const mergeSuggestions = (f: Fields): { next: Fields; usedGuess: boolean } => {
-    const next: Record<string, unknown> = { ...f };
-    if (picked) next.csl = JSON.stringify(picked.csl);
-    let usedGuess = false;
-
-    for (const k of SUGGEST_KEYS) {
-      const cur = f[k];
-      if (cur !== null && cur !== undefined && String(cur).trim() !== "") continue;
-      const found = foundAt(k);
-      if (found !== undefined) {
-        next[k] = found;
-        continue;
-      }
-      const g = guessAt(k);
-      if (g !== undefined) {
-        next[k] = g;
-        usedGuess = true;
-      }
-    }
-    return { next: next as Fields, usedGuess };
-  };
-
-  const withSuggestions = (f: Fields): Fields => mergeSuggestions(f).next;
-
-  /** 머리의 "전부 적용". */
-  const applyAll = () => setFields(withSuggestions);
-
-  /** 빈 칸이면 제안을 회색 글씨(플레이스홀더)로 미리 보여 준다. */
-  const ph = (k: SuggestKey, fallback: string): string => ghostAt(k)?.value ?? fallback;
-
-  /**
-   * 칸 밑에 붙는 적용 줄. 이미 같은 값이면 아무것도 안 띄운다.
-   *
-   * **등록기관이 그 칸을 들고 있으면 추측은 아예 안 보여 준다.** 둘을 나란히
-   * 늘어놓으면 사람이 둘 중 하나를 고르는 일이 생기는데, 그 일을 없애려고
-   * 찾아오기를 먼저 돌린 것이다. 어긋난 것이 있으면 에이전트 상자의
-   * `mismatch` 한 줄이 대신 말해 준다.
-   */
-  const sug = (k: SuggestKey) => {
-    const cur = String(fields[k] ?? "").trim();
-    const found = foundAt(k);
-    if (found !== undefined) {
-      if (String(found).trim() === cur) return null;
-      return (
-        <SuggestRow
-          origin="lookup"
-          sourceLabel={picked ? SOURCE_LABEL[picked.source] : "등록기관"}
-          blank={isBlank(k)}
-          value={String(found)}
-          onApply={() => applyOne(k, "lookup")}
-        />
-      );
-    }
-    const g = guessAt(k);
-    if (g === undefined || String(g).trim() === cur) return null;
-    return (
-      <SuggestRow
-        origin="agent"
-        sourceLabel="에이전트 추측"
-        blank={isBlank(k)}
-        value={String(g)}
-        onApply={() => applyOne(k, "agent")}
-      />
+    const out = await fillOne(
+      paperId,
+      { title: base.title, doi: base.doi, arxivId: base.arxivId },
+      {
+        alive: () => runSeq.current === seq,
+        onReport: (r) => setReport(r),
+        onLookupError: (m) => setLookupError(m),
+        // 찾아온 것은 기다리지 않고 그 자리에서 앉힌다. 에이전트가 1분을
+        // 더 도는 동안 화면이 비어 있을 이유가 없다.
+        onPicked: (c) => applyFound(c),
+        onAgent: () => setAgentBusy("agent"),
+      },
     );
+
+    if (runSeq.current !== seq) return;
+    setAgentBusy(null);
+    if (out.kind === "aborted") return;
+    if (out.kind === "picking") {
+      setReport(out.report);
+      setPendingPick(true);
+      return;
+    }
+    if (out.kind === "failed") {
+      setAgentError(out.error);
+      return;
+    }
+    setGuess(out.guess);
+    setGuessId(out.guessId);
+    if (out.guess) applyGuess(out.guess, out.picked);
   };
+
+  /**
+   * 앞서 받아 둔 제안만 앉힌다. **에이전트를 다시 부르지 않는다.**
+   *
+   * 한 편에 1분이 넘는 일을 시트를 다시 열었다는 이유로 또 시킬 수는 없다.
+   * 찾아오기를 여기서 같이 돌지 않는 것은, 그 제안이 그때 등록기관 값을
+   * 단서로 받고 만들어진 것이라 등록기관이 든 칸은 애초에 비어 있기 때문이다.
+   * 정확한 쪽이 필요하면 아래 "찾아오기" 를 누르면 된다.
+   */
+  const useStored = () => {
+    if (!stored) return;
+    beginRun();
+    applyGuess(stored.fields, null);
+    setGuess(stored.fields);
+    setGuessId(stored.id);
+    setStored(null);
+  };
+
+  /**
+   * 후보를 고르면 그 값이 칸에 앉고, 멈춰 있던 에이전트가 그것을 단서로 이어 돈다.
+   */
+  const pick = (c: LookupResult) => {
+    applyFound(c);
+    if (!pendingPick || !paperId) return;
+    const seq = ++runSeq.current;
+    setPendingPick(false);
+    setAgentError(null);
+    setAgentBusy("agent");
+    void (async () => {
+      const out = await askAgent(paperId, clueOf(c), () => runSeq.current === seq);
+      if (runSeq.current !== seq) return;
+      setAgentBusy(null);
+      if (out.kind === "aborted") return;
+      if (out.kind === "failed") {
+        setAgentError(out.error);
+        return;
+      }
+      setGuess(out.guess);
+      setGuessId(out.guessId);
+      if (out.guess) applyGuess(out.guess, c);
+    })();
+  };
+
+  /** 이번 채우기가 앉힌 칸들. 무엇이 덮였는지 한 줄로 말하는 데 쓴다. */
+  const filled = SUGGEST_KEYS.filter((k) => marks[k]);
+  const filledByLookup = filled.filter((k) => marks[k] === "lookup").length;
+  const filledByGuess = filled.length - filledByLookup;
 
   const submit = async () => {
     if (busy) return;
     setBusy(true);
     try {
       /*
-       * 회색으로 보이던 제안을 그대로 저장한다.
+       * **칸에 보이는 것을 그대로 저장한다.**
        *
-       * 예전에는 "전부 적용" 을 눌러야만 들어갔다. 화면에는 값이 보이는데
-       * 저장하면 빈 칸이 되는 셈이라, 눌렀는지 안 눌렀는지를 사람이 기억해야
-       * 했다. 보이는 것이 저장되는 것과 같아야 한다.
+       * 예전에는 여기서 회색 제안을 한 번 더 섞었다. 지금은 섞을 것이 없다 —
+       * 채우기가 이미 칸에 앉혔고, 그 뒤에 사람이 고친 것이 있으면 그것이
+       * 마지막 말이다. 보이는 것과 저장되는 것이 갈라질 자리가 없어졌다.
        *
-       * 이미 적어 둔 칸은 여전히 안 덮는다 — 그건 사람이 고른 값이다.
+       * **여기가 경계선이다.** 이 줄 위의 어떤 코드도 논문을 바꾸지 않는다.
+       * 찾아오기도 에이전트도 배치도 전부 React 상태까지만 온다.
        */
-      const merged = mergeSuggestions(fields);
-      await onSubmit(groupId, merged.next);
+      await onSubmit(groupId, fields);
       /*
        * 저장이 끝난 **뒤에** "적용했다" 를 표시한다.
        *
@@ -725,7 +724,7 @@ export function PaperSheet({
        * 되받지 않는 것은, 표시가 안 남는 것보다 저장이 성공한 것이 훨씬
        * 중요하기 때문이다.
        */
-      if (merged.usedGuess && guessId && paperId) {
+      if (guessUsed && guessId && paperId) {
         void api.biblio.markApplied(paperId, guessId).catch(() => undefined);
       }
       onClose();
@@ -776,6 +775,149 @@ export function PaperSheet({
         </header>
 
         <div className="flex flex-col gap-4 px-5 py-5">
+          {/*
+            에이전트에게 채우게 하는 단추. **시트 제일 위다.**
+
+            예전에는 맨 아래 체크박스였고, 그 자리의 근거는 "찾아오기가 먼저 돌고
+            거기서 안 채운 것만 여기로 내려온다" 는 순서였다. 도는 순서는 지금도
+            같다. 다만 단추는 그 순서의 **끝**이 아니라 **방아쇠**다 — 이 화면에서
+            가장 먼저 할 일이 되었으니 가장 먼저 보여야 한다.
+
+            찾아오기 상자와 후보 고르기는 DOI·arXiv 칸 옆에 그대로 둔다. 그 두 칸이
+            그쪽 단추의 재료이고, 후보를 고르는 일은 이 단추가 멈춰 선 자리에서
+            사람이 이어 주는 것이라 값이 흘러 들어가는 칸 옆에 있어야 한다.
+          */}
+          <div
+            className={cn(
+              "flex flex-col gap-2 rounded-lg bg-(--color-bg-2) px-3 py-3 ring-1 ring-(--color-border-soft)",
+              !agent?.ready && "opacity-70",
+            )}
+          >
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => void fillAll()}
+                  disabled={!agent?.ready || Boolean(agentBusy)}
+                  className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-3.5 py-1.5 text-xs font-medium text-(--color-bg) transition hover:bg-(--color-accent-strong) disabled:opacity-40"
+                >
+                  {agentBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  에이전트에게 채우게 하기
+                </button>
+                <p className="mt-1.5 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                  먼저 바깥에서 찾아오고, 거기서 못 채운 칸만 PDF 앞부분을 읽어
+                  짐작합니다. <b className="text-(--color-fg-3)">적어 둔 값도 덮습니다.</b>{" "}
+                  논문이 바뀌는 것은 아래 <b className="text-(--color-fg-3)">저장</b>을
+                  누른 뒤입니다.
+                </p>
+              </div>
+              {/*
+                되돌리기는 **채운 것이 있을 때만** 뜬다. 돌아갈 자리가 없는데
+                단추가 서 있으면 그 자체가 거짓말이다.
+              */}
+              {filled.length > 0 && (
+                <button
+                  type="button"
+                  onClick={undo}
+                  className="flex shrink-0 items-center gap-1 rounded-full bg-(--color-surface-hi) px-2.5 py-1 text-[11px] font-medium text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface)"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  되돌리기
+                </button>
+              )}
+            </div>
+
+            {/*
+              무엇이 덮였는지 세어 말한다. 칸마다 붙는 딱지는 "이 칸이 어디서
+              왔는가" 만 말해서, 화면을 내려 보기 전에는 몇 칸이 바뀌었는지 모른다.
+            */}
+            {filled.length > 0 && !agentBusy && (
+              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-3)">
+                {filled.length}칸을 채웠습니다
+                {filledByLookup > 0 && ` · 등록기관 ${filledByLookup}`}
+                {filledByGuess > 0 && ` · 추측 ${filledByGuess}`} — 이름표 옆 딱지가
+                칸마다 출처를 말합니다. 되돌리기는 몇 번을 눌렀든 <b>채우기 전의 값</b>으로
+                한 번에 돌아갑니다.
+              </p>
+            )}
+
+            {/*
+              못 쓰는 이유를 그 자리에 적는다.
+              꺼진 단추만 있으면 사람은 자기가 뭘 잘못한 줄 안다.
+            */}
+            {agent && !agent.ready && agent.reason && (
+              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                {agent.reason}
+              </p>
+            )}
+
+            {/*
+              받아 둔 제안. 있다는 것만 말하고 **앉히지는 않는다** — 덮어쓰기는
+              사람이 누른 뒤여야 한다.
+            */}
+            {stored && !agentBusy && filled.length === 0 && (
+              <div className="flex items-start gap-2">
+                <p className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                  앞서 에이전트가 내놓은 추측이 남아 있습니다. 이것을 쓰면 다시 부르지
+                  않습니다.
+                </p>
+                <button
+                  type="button"
+                  onClick={useStored}
+                  className="shrink-0 rounded-full border border-dashed border-(--color-fg-4)/60 px-2 py-0.5 text-[10.5px] font-medium text-(--color-fg-3) transition hover:bg-(--color-surface-hi)"
+                >
+                  받아 둔 값 쓰기
+                </button>
+              </div>
+            )}
+
+            {/* 어느 단계에 있는지 말한다. 둘은 걸리는 시간도 원인도 다르다. */}
+            {agentBusy && (
+              <p className="flex items-center gap-1.5 text-[10.5px] text-(--color-fg-4)">
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                {agentBusy === "lookup"
+                  ? "먼저 바깥에서 서지정보를 찾는 중"
+                  : "PDF 앞부분을 읽는 중 (1분 넘게 걸릴 수 있습니다)"}
+              </p>
+            )}
+
+            {pendingPick && !agentBusy && (
+              <p className="text-[10.5px] leading-snug break-keep text-(--color-warn)">
+                후보가 여럿이라 멈춰 있습니다. 아래 DOI·arXiv 칸 밑에서 맞는 것을
+                고르면 그 값이 칸에 앉고, 그것을 단서로 나머지를 이어서 채웁니다.
+              </p>
+            )}
+
+            {agentError && (
+              <p className="flex items-start gap-1.5 text-[10.5px] leading-snug break-keep text-(--color-danger)">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                <span className="min-w-0">{agentError}</span>
+              </p>
+            )}
+
+            {/*
+              어긋난 자리는 **고치지 않고 알려만 준다.**
+              등록기관과 논문이 다르게 말할 때 어느 쪽이 맞는지는 사람이 정한다.
+            */}
+            {guess?.mismatch && (
+              <p className="flex items-start gap-1.5 text-[10.5px] leading-snug break-keep text-(--color-warn)">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                <span className="min-w-0">찾아온 값과 논문이 어긋납니다 — {guess.mismatch}</span>
+              </p>
+            )}
+
+            {filledByGuess > 0 && !agentBusy && (
+              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
+                추측으로 채운 칸에는 받아 온 원본(CSL)이 없습니다. 저장하기 전에
+                한 번 훑어보세요.
+              </p>
+            )}
+          </div>
+
           {/* 붙은 파일 */}
           {file && (
             <div className="flex items-center gap-3 rounded-lg bg-(--color-bg-2) p-3 ring-1 ring-(--color-border-soft)">
@@ -798,17 +940,12 @@ export function PaperSheet({
             </div>
           )}
 
-          <Field
-            label="제목"
-            required
-            suggestion={sug("title")}
-            origin={ghostAt("title")?.origin ?? null}
-          >
+          <Field label="제목" required origin={marks.title ?? null}>
             <input
               ref={titleRef}
               value={fields.title}
               onChange={(e) => set("title", e.target.value)}
-              placeholder={ph("title", "논문 제목")}
+              placeholder="논문 제목"
               className={INPUT}
             />
           </Field>
@@ -816,34 +953,26 @@ export function PaperSheet({
           <Field
             label="저자"
             hint="사람이 읽는 한 줄로 적습니다. 쉼표로 나누면 보기 좋습니다"
-            suggestion={sug("authors")} origin={ghostAt("authors")?.origin ?? null}
+            origin={marks.authors ?? null}
           >
             <input
               value={fields.authors ?? ""}
               onChange={(e) => set("authors", e.target.value || null)}
-              placeholder={ph("authors", "Vaswani, Shazeer, Parmar…")}
+              placeholder="Vaswani, Shazeer, Parmar…"
               className={INPUT}
             />
           </Field>
 
           <div className="grid grid-cols-[1fr_110px] gap-3">
-            <Field
-              label="학회 · 저널"
-              suggestion={sug("venue")}
-              origin={ghostAt("venue")?.origin ?? null}
-            >
+            <Field label="학회 · 저널" origin={marks.venue ?? null}>
               <input
                 value={fields.venue ?? ""}
                 onChange={(e) => set("venue", e.target.value || null)}
-                placeholder={ph("venue", "NeurIPS")}
+                placeholder="NeurIPS"
                 className={INPUT}
               />
             </Field>
-            <Field
-              label="연도"
-              suggestion={sug("year")}
-              origin={ghostAt("year")?.origin ?? null}
-            >
+            <Field label="연도" origin={marks.year ?? null}>
               <input
                 value={fields.year ?? ""}
                 inputMode="numeric"
@@ -853,30 +982,26 @@ export function PaperSheet({
                   const raw = e.target.value.replace(/[^0-9]/g, "").slice(0, 4);
                   set("year", raw ? Number(raw) : null);
                 }}
-                placeholder={ph("year", "2017")}
+                placeholder="2017"
                 className={INPUT}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="DOI" suggestion={sug("doi")} origin={ghostAt("doi")?.origin ?? null}>
+            <Field label="DOI" origin={marks.doi ?? null}>
               <input
                 value={fields.doi ?? ""}
                 onChange={(e) => set("doi", e.target.value.trim() || null)}
-                placeholder={ph("doi", "10.1145/3292500")}
+                placeholder="10.1145/3292500"
                 className={INPUT}
               />
             </Field>
-            <Field
-              label="arXiv"
-              suggestion={sug("arxivId")}
-              origin={ghostAt("arxivId")?.origin ?? null}
-            >
+            <Field label="arXiv" origin={marks.arxivId ?? null}>
               <input
                 value={fields.arxivId ?? ""}
                 onChange={(e) => set("arxivId", e.target.value.trim() || null)}
-                placeholder={ph("arxivId", "1706.03762")}
+                placeholder="1706.03762"
                 className={INPUT}
               />
             </Field>
@@ -905,16 +1030,6 @@ export function PaperSheet({
               <p className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
                 DOI → arXiv → 제목 차례로 바깥에서 찾습니다.
               </p>
-              {(picked || guess) && (
-                <button
-                  type="button"
-                  onClick={applyAll}
-                  className="flex shrink-0 items-center gap-1 rounded-full bg-(--color-accent)/15 px-2.5 py-1 text-[11px] font-medium text-(--color-accent) transition hover:bg-(--color-accent)/25"
-                >
-                  <Check className="h-3 w-3" />
-                  전부 적용
-                </button>
-              )}
             </div>
 
             {/*
@@ -928,7 +1043,7 @@ export function PaperSheet({
                   후보 {report.candidates.length}개 — 맞는 것을 고르세요
                   {/* 에이전트가 이 선택을 기다리고 있다는 것을 그 자리에서 말한다.
                       아래 상자에만 적어 두면 왜 멈춰 있는지 보이지 않는다. */}
-                  {pendingPick && " (고르면 남은 빈 칸을 에이전트가 이어서 채웁니다)"}
+                  {pendingPick && " (고르면 그 값이 칸에 앉고 나머지를 이어서 채웁니다)"}
                 </div>
                 {report.candidates.map((c, i) => (
                   <button
@@ -956,11 +1071,12 @@ export function PaperSheet({
               </div>
             )}
 
-            {picked && (
+            {/* 되돌린 뒤에는 "들어갔습니다" 가 거짓말이 된다. 칸에 남아 있을 때만 말한다. */}
+            {picked && filledByLookup > 0 && (
               <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                빈 칸에 회색으로 미리 들어가 있습니다. 이미 적어 둔 칸은 그대로 두고,
-                덮으려면 그 칸의 단추를 누르세요. 적용하면 받아 온 <b>원본</b>도 함께
-                저장되어 BibTeX 내보내기가 온전해집니다.
+                찾아온 값이 위 칸에 들어갔습니다 — 적어 두었던 값은 덮였습니다. 받아 온{" "}
+                <b>원본</b>도 함께 실려 BibTeX 내보내기가 온전해집니다. 되돌리려면 맨 위의
+                되돌리기를 누르세요.
               </p>
             )}
 
@@ -1013,15 +1129,11 @@ export function PaperSheet({
             </div>
           )}
 
-          <Field
-            label="원문 주소"
-            suggestion={sug("url")}
-            origin={ghostAt("url")?.origin ?? null}
-          >
+          <Field label="원문 주소" origin={marks.url ?? null}>
             <input
               value={fields.url ?? ""}
               onChange={(e) => set("url", e.target.value.trim() || null)}
-              placeholder={ph("url", "https://arxiv.org/abs/1706.03762")}
+              placeholder="https://arxiv.org/abs/1706.03762"
               className={INPUT}
             />
           </Field>
@@ -1035,16 +1147,12 @@ export function PaperSheet({
             />
           </Field>
 
-          <Field
-            label="초록"
-            suggestion={sug("abstract")}
-            origin={ghostAt("abstract")?.origin ?? null}
-          >
+          <Field label="초록" origin={marks.abstract ?? null}>
             <textarea
               value={fields.abstract ?? ""}
               onChange={(e) => set("abstract", e.target.value || null)}
               rows={5}
-              placeholder={ph("abstract", "붙여 넣어 두면 나중에 찾기 쉽습니다")}
+              placeholder="붙여 넣어 두면 나중에 찾기 쉽습니다"
               className={cn(INPUT, "scrollbar-thin resize-y leading-relaxed")}
             />
           </Field>
@@ -1062,97 +1170,6 @@ export function PaperSheet({
               ))}
             </select>
           </Field>
-
-          {/*
-            에이전트에게 남은 빈 칸을 맡기는 자리.
-
-            찾아오기 상자 **아래**에 둔다. 도는 순서가 그렇기 때문이다 —
-            바깥에서 찾아온 것이 먼저 위 칸들에 앉고, 거기서 안 채워진 것만
-            여기로 내려온다. 위아래를 바꾸면 화면이 순서를 거꾸로 말한다.
-          */}
-          <div
-            className={cn(
-              "flex flex-col gap-2 rounded-lg bg-(--color-bg-2) px-3 py-3 ring-1 ring-(--color-border-soft)",
-              !agent?.ready && "opacity-70",
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <Sparkles
-                className={cn(
-                  "mt-0.5 h-4 w-4 shrink-0",
-                  agentOn ? "text-(--color-accent-strong)" : "text-(--color-fg-4)",
-                )}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs text-(--color-fg-3)">에이전트가 서지정보 채우기</div>
-                <p className="mt-0.5 text-[10.5px] break-keep text-(--color-fg-4)">
-                  먼저 바깥에서 찾아오고, 거기서 못 채운 칸만 PDF 앞부분을 읽어
-                  짐작합니다. 짐작한 값은 <b className="text-(--color-fg-3)">점선</b>으로
-                  따로 표시됩니다.
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={agentOn}
-                disabled={!agent?.ready}
-                onChange={(e) => toggleAgent(e.target.checked)}
-                aria-label="에이전트가 서지정보 채우기"
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-(--color-border) bg-(--color-bg-2) disabled:cursor-not-allowed"
-              />
-            </div>
-
-            {/*
-              못 쓰는 이유를 그 자리에 적는다.
-              꺼진 토글만 있으면 사람은 자기가 뭘 잘못한 줄 안다.
-            */}
-            {agent && !agent.ready && agent.reason && (
-              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                {agent.reason}
-              </p>
-            )}
-
-            {/* 어느 단계에 있는지 말한다. 둘은 걸리는 시간도 원인도 다르다. */}
-            {agentBusy && (
-              <p className="flex items-center gap-1.5 text-[10.5px] text-(--color-fg-4)">
-                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                {agentBusy === "lookup"
-                  ? "먼저 바깥에서 서지정보를 찾는 중"
-                  : "PDF 앞부분을 읽는 중 (1분 넘게 걸릴 수 있습니다)"}
-              </p>
-            )}
-
-            {pendingPick && !agentBusy && (
-              <p className="text-[10.5px] leading-snug break-keep text-(--color-warn)">
-                후보가 여럿이라 멈춰 있습니다. 위에서 맞는 것을 고르면 그것을 단서로
-                남은 빈 칸을 채웁니다.
-              </p>
-            )}
-
-            {agentError && (
-              <p className="flex items-start gap-1.5 text-[10.5px] leading-snug break-keep text-(--color-danger)">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                <span className="min-w-0">{agentError}</span>
-              </p>
-            )}
-
-            {/*
-              어긋난 자리는 **고치지 않고 알려만 준다.**
-              등록기관과 논문이 다르게 말할 때 어느 쪽이 맞는지는 사람이 정한다.
-            */}
-            {guess?.mismatch && (
-              <p className="flex items-start gap-1.5 text-[10.5px] leading-snug break-keep text-(--color-warn)">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                <span className="min-w-0">찾아온 값과 논문이 어긋납니다 — {guess.mismatch}</span>
-              </p>
-            )}
-
-            {guess && !agentBusy && (
-              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                추측한 값에는 받아 온 원본이 없습니다. 저장할 때 빈 칸에만 들어가고,
-                이미 적어 둔 칸은 그대로 둡니다.
-              </p>
-            )}
-          </div>
         </div>
 
         <footer className="sticky bottom-0 mt-auto flex items-center justify-end gap-2 border-t border-(--color-border-soft) bg-(--color-surface) px-5 py-4">
@@ -1187,30 +1204,25 @@ const INPUT =
 /**
  * 이름표와 칸 한 벌.
  *
- * 바깥이 `<label>` 이 아니라 `<div>` 인 것은 제안 단추 때문이다. `<label>` 안의
- * 단추를 누르면 브라우저가 딸린 칸까지 함께 눌러(포커스) 버려서, "적용" 을 눌렀는데
- * 커서가 엉뚱한 칸으로 뛰는 일이 생긴다. 그래서 이름표와 칸만 `<label>` 로 묶고
- * 제안 줄은 그 바깥에 둔다.
+ * 이름표와 칸만 `<label>` 로 묶고 바깥은 `<div>` 다. 힌트까지 `<label>` 안에
+ * 넣으면 그것을 누를 때도 칸에 포커스가 뛴다.
  */
 function Field({
   label,
   hint,
   required,
-  suggestion,
   origin,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
-  /** 찾아온 값을 이 칸에 넣는 줄. 제안이 없으면 null. */
-  suggestion?: React.ReactNode;
   /**
-   * 지금 칸 안에 회색으로 비쳐 보이는 값이 어디서 왔는가.
+   * 이 칸에 지금 앉아 있는 값이 어디서 왔는가. 사람이 적은 값이면 null.
    *
-   * 이름표 옆에 작은 딱지로 붙는다. 회색 글씨 자체는 두 출처가 똑같이 보이는데
-   * (플레이스홀더는 색을 나눌 자리가 없다), 그 값이 등록기관에서 온 것인지
-   * 모델의 추측인지는 **저장하기 전에** 알아야 한다.
+   * 이름표 옆에 작은 딱지로 붙는다. 값이 **진짜로 칸에 들어앉기 때문에** 이것이
+   * 없으면 내가 적은 값과 방금 덮인 값이 똑같아 보인다. 등록기관에서 온
+   * 것인지 모델의 추측인지는 **저장하기 전에** 알아야 한다.
    */
   origin?: Origin | null;
   children: React.ReactNode;
@@ -1226,7 +1238,6 @@ function Field({
         {children}
       </label>
       {hint && <span className="text-[10.5px] break-keep text-(--color-fg-4)">{hint}</span>}
-      {suggestion}
     </div>
   );
 }
@@ -1248,65 +1259,6 @@ function OriginBadge({ origin }: { origin: Origin }) {
       <Sparkles className="h-2 w-2" />
       추측
     </span>
-  );
-}
-
-/**
- * 제안 값을 이 칸에 넣는 줄.
- *
- * 빈 칸이면 값이 이미 회색 글씨로 칸 안에 보이므로 단추만 있으면 된다.
- * **사람이 적어 둔 칸은 다르다** — 무엇으로 바뀌는지 보여 주고, 단추 이름도
- * "덮어쓰기" 로 말한다. 적어 둔 것이 소리 없이 사라지는 것이 가장 나쁘다.
- *
- * 출처를 말머리로 단다. "찾아온 값" 과 "에이전트 추측" 이 같은 문장으로 뜨면
- * 둘 다 어디선가 확인된 값처럼 읽히는데, 한쪽은 모델이 지은 것이다.
- * 추측 줄은 단추까지 점선으로 눌러 둔다 — 눈에 먼저 들어오는 쪽은 정확한
- * 쪽이어야 한다.
- */
-function SuggestRow({
-  origin,
-  sourceLabel,
-  blank,
-  value,
-  onApply,
-}: {
-  origin: Origin;
-  /** 어디서 왔는지 사람이 읽는 이름. "DOI", "제목 검색", "에이전트 추측". */
-  sourceLabel: string;
-  blank: boolean;
-  value: string;
-  onApply: () => void;
-}) {
-  const guessed = origin === "agent";
-  return (
-    <div className="flex items-start gap-2">
-      <p className="min-w-0 flex-1 text-[10.5px] leading-snug text-(--color-fg-4)">
-        {blank ? (
-          <span>
-            <span className={cn(guessed && "text-(--color-fg-3)")}>{sourceLabel}</span>
-            {guessed ? " 값이 회색으로 들어 있습니다" : " 에서 받은 값이 회색으로 들어 있습니다"}
-          </span>
-        ) : (
-          <span className="line-clamp-2 break-all">
-            {sourceLabel}: <span className="text-(--color-fg-3)">{value}</span>
-          </span>
-        )}
-      </p>
-      <button
-        type="button"
-        onClick={onApply}
-        className={cn(
-          "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium transition",
-          guessed
-            ? "border border-dashed border-(--color-fg-4)/60 text-(--color-fg-3) hover:bg-(--color-surface-hi)"
-            : blank
-              ? "bg-(--color-accent)/15 text-(--color-accent) hover:bg-(--color-accent)/25"
-              : "bg-(--color-warn)/15 text-(--color-warn) hover:bg-(--color-warn)/25",
-        )}
-      >
-        {blank ? "적용" : "덮어쓰기"}
-      </button>
-    </div>
   );
 }
 
