@@ -23,11 +23,10 @@ import { getPaperRow } from "@/lib/paper-server";
  * 폴링이 "에이전트가 뭔가 바꿨다" 로 읽어 서재를 통째로 다시 받아 온다.
  * `/api/lookup` 이 같은 이유로 안 부른다.
  *
- * ## 여기 실려 나가는 것은 남이 만든 글이다
+ * ## 태그로 감싸지 않는다
  *
- * 논문 PDF 는 남이 만든 파일이고, 그 안의 문장은 자료지 지시가 아니다.
- * 울타리(`fenceUntrusted`)는 모델에게 넘기는 자리에서 두른다 — 이 라우트는
- * 사람이 읽을 수도 있는 원문 그대로를 낸다.
+ * 모델에게 넘기는 자리(`suggest.ts`)에서 `fencePaperText` 로 감싼다 — 이
+ * 라우트는 사람이 읽을 수도 있는 원문 그대로를 낸다.
  */
 
 export const dynamic = "force-dynamic";
