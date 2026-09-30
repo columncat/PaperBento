@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Mail, NotebookPen } from "lucide-react";
+import { ArrowUpRight, AudioLines, BookMarked, Mail, StickyNote, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 
 /**
@@ -14,9 +14,11 @@ import { useEffect, useState } from "react";
  * 덕분에 들어온 경로를 그대로 따라간다. 서버가 `href`(환경변수 override)를 주면
  * 그 값이 항상 이긴다.
  *
- * 유추는 **브라우저에서만** 할 수 있다(`window.location` 이 있어야 한다).
- * 그래서 첫 렌더에는 빈 주소로 두고 `useEffect` 에서 채운다 — 서버가 그린
- * HTML 과 어긋나지 않게.
+ * **한 도메인을 경로로 나눠 쓰는 배포는 유추로 못 맞힌다.** `bento.example.com/voice`
+ * 에서 `/memo` 로 가야 하는데, 여기서는 호스트만 보고 경로를 모른다. 그런
+ * 배포에서는 환경변수로 전체 주소를 주어야 한다 — 그래서 `href` 가 늘 이긴다.
+ * 지금 배포가 바로 그 모양이라(`bento.columncat.cc/mail|/memo|/paper|/voice|/ledger`)
+ * 이 앱에서는 사실상 늘 `href` 가 쓰인다.
  */
 export function siblingAppUrl(
   self: string,
@@ -31,60 +33,56 @@ export function siblingAppUrl(
   return `${protocol}//${hostname}:${defaultPort}`;
 }
 
-const BUTTON =
-  "group flex items-center gap-2 rounded-full bg-(--color-surface) px-4 py-2 text-sm text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-2)";
+/** 이 앱이 무엇인지. 유추할 때 자기 서브도메인 이름으로도 쓴다. */
+const SELF = "paperbento";
 
-function useSiblingUrl(href: string | null | undefined, sibling: string, port: number) {
+/**
+ * 아이콘은 형제 앱들과 **같은 것**을 쓴다. 여섯 앱을 오가는 사람에게 같은 앱이
+ * 자리마다 다른 그림으로 보이면 그것만으로 길을 잃는다.
+ */
+const APPS = {
+  mailbento: { label: "MailBento", icon: Mail, port: 3000 },
+  memobento: { label: "MemoBento", icon: StickyNote, port: 3001 },
+  paperbento: { label: "PaperBento", icon: BookMarked, port: 3002 },
+  voicebento: { label: "VoiceBento", icon: AudioLines, port: 3003 },
+  ledgerbento: { label: "LedgerBento", icon: Wallet, port: 3004 },
+} as const;
+
+export type AppKey = keyof typeof APPS;
+
+/**
+ * 형제 앱으로 건너가는 버튼.
+ *
+ * 앱마다 따로 만들지 않고 하나로 둔다. 앱이 셋이 되면서 같은 모양의 컴포넌트가
+ * 앱마다 둘씩 생길 판이었다 — 여섯이 된 지금은 열이 됐을 것이다.
+ */
+export function CrossAppLink({
+  app,
+  href,
+}: {
+  app: AppKey;
+  href?: string | null;
+}) {
+  const meta = APPS[app];
   const [url, setUrl] = useState(href ?? "");
+
   useEffect(() => {
     if (href) {
       setUrl(href);
       return;
     }
-    setUrl(siblingAppUrl("paperbento", sibling, port));
-  }, [href, sibling, port]);
-  return url;
-}
+    setUrl(siblingAppUrl(SELF, app, meta.port));
+  }, [href, app, meta.port]);
 
-/** 자매 앱(MailBento)으로 건너가는 버튼. */
-export function MailBentoLink({
-  href,
-  defaultPort = 3000,
-}: {
-  href?: string | null;
-  defaultPort?: number;
-}) {
-  const url = useSiblingUrl(href, "mailbento", defaultPort);
+  const Icon = meta.icon;
   return (
     <a
       href={url || "#"}
-      className={BUTTON}
-      title={url ? `MailBento 로 이동 (${url})` : "MailBento 로 이동"}
+      className="group flex items-center gap-2 rounded-full bg-(--color-surface) px-4 py-2 text-sm text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-2)"
+      title={url ? `${meta.label} 로 이동 (${url})` : `${meta.label} 로 이동`}
     >
-      <Mail className="h-4 w-4" />
-      <span className="hidden lg:inline">MailBento</span>
-      <ArrowUpRight className="h-3 w-3 text-(--color-fg-4) transition group-hover:text-(--color-fg-2)" />
-    </a>
-  );
-}
-
-/** 자매 앱(MemoBento)으로 건너가는 버튼. */
-export function MemoBentoLink({
-  href,
-  defaultPort = 3001,
-}: {
-  href?: string | null;
-  defaultPort?: number;
-}) {
-  const url = useSiblingUrl(href, "memobento", defaultPort);
-  return (
-    <a
-      href={url || "#"}
-      className={BUTTON}
-      title={url ? `MemoBento 로 이동 (${url})` : "MemoBento 로 이동"}
-    >
-      <NotebookPen className="h-4 w-4" />
-      <span className="hidden lg:inline">MemoBento</span>
+      <Icon className="h-4 w-4" />
+      <span className="hidden sm:inline">{meta.label}</span>
       <ArrowUpRight className="h-3 w-3 text-(--color-fg-4) transition group-hover:text-(--color-fg-2)" />
     </a>
   );

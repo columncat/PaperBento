@@ -27,6 +27,13 @@ const envSchema = z.object({
    */
   MAILBENTO_URL: z.string().optional(),
   MEMOBENTO_URL: z.string().optional(),
+  /**
+   * 장부함으로 건너가는 버튼의 주소 (선택).
+   *
+   * 비우면 접속한 호스트의 3004 포트로 유추한다. 한 도메인을 경로로 나눠 쓰는
+   * 배포는 유추로 못 맞히므로 전체 주소를 적어야 한다.
+   */
+  LEDGERBENTO_URL: z.string().optional(),
 
   /**
    * 에이전트(BentoAgent)의 HTTP 입구. 둘 다 채워야 채팅창이 뜬다.

@@ -26,7 +26,7 @@ import {
   type BatchState,
   type BiblioPrefill,
 } from "./biblio-batch";
-import { MailBentoLink, MemoBentoLink } from "./cross-app-link";
+import { CrossAppLink } from "./cross-app-link";
 import { AddGroupCard, type GroupHandlers } from "./group-card";
 import type { PaperRowActions } from "./paper-row";
 import { PaperSheet, type SheetTarget } from "./paper-sheet";
@@ -46,11 +46,14 @@ export function Library({
   initial,
   mailbentoUrl,
   memobentoUrl,
+  ledgerbentoUrl,
 }: {
   initial: GroupDTO[];
   /** 환경변수 override. null 이면 지금 접속한 호스트에서 유추한다. */
   mailbentoUrl: string | null;
   memobentoUrl: string | null;
+  /** LEDGERBENTO_URL override. null 이면 현재 호스트의 3004 포트로 유추. */
+  ledgerbentoUrl: string | null;
 }) {
   const [groups, setGroups] = useState<GroupDTO[]>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -568,8 +571,9 @@ export function Library({
               답변 안의 `[[memo:…]]` 는 회색 글자로 남을 뿐이다. */}
           <AgentChat />
 
-          <MailBentoLink href={mailbentoUrl} />
-          <MemoBentoLink href={memobentoUrl} />
+          <CrossAppLink app="mailbento" href={mailbentoUrl} />
+          <CrossAppLink app="memobento" href={memobentoUrl} />
+          <CrossAppLink app="ledgerbento" href={ledgerbentoUrl} />
           <Link
             href="/settings"
             className="flex items-center gap-2 rounded-full bg-(--color-accent-soft) px-4 py-2 text-sm text-(--color-accent-strong) ring-1 ring-(--color-accent)/40 transition hover:bg-(--color-accent)/25"
