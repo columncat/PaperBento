@@ -1,5 +1,5 @@
 import { Library } from "@/components/library";
-import { env } from "@/lib/env";
+import { appUrls } from "@/lib/app-urls";
 import { listGroups } from "@/lib/paper-server";
 
 /**
@@ -18,9 +18,7 @@ export default async function HomePage() {
   return (
     <Library
       initial={listGroups()}
-      mailbentoUrl={env.MAILBENTO_URL?.trim() || null}
-      memobentoUrl={env.MEMOBENTO_URL?.trim() || null}
-      ledgerbentoUrl={env.LEDGERBENTO_URL?.trim() || null}
+      appUrls={appUrls()}
     />
   );
 }

@@ -34,6 +34,11 @@ const envSchema = z.object({
    * 배포는 유추로 못 맞히므로 전체 주소를 적어야 한다.
    */
   LEDGERBENTO_URL: z.string().optional(),
+  /**
+   * 음성함으로 건너가는 메뉴 칸의 주소 (선택). 다른 형제 주소와 같다 — 비우면
+   * 3003 포트로 유추하고, 한 도메인을 경로로 나눠 쓰는 배포에서는 전체 주소를 적는다.
+   */
+  VOICEBENTO_URL: z.string().optional(),
 
   /**
    * 에이전트(BentoAgent)의 HTTP 입구. 둘 다 채워야 채팅창이 뜬다.
