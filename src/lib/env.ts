@@ -49,12 +49,16 @@ const envSchema = z.object({
   AGENT_TOKEN: z.string().optional(),
 
   /**
-   * 인증 설정 — 둘 다 비우면 인증 비활성 (앱 그대로 공개).
+   * 인증 설정 — **둘 다 있어야 앱이 열린다.** 하나라도 비면 미들웨어가 모든
+   * 요청을 503 으로 막는다 (`lib/auth-mode.ts`). 비밀번호 없이 쓰려면
+   * `AUTH_DISABLED=1` 을 일부러 적는다.
    * - AUTH_PASSWORD: plaintext 또는 bcrypt 해시 ($2a$ / $2b$ 시작). 둘 다 자동 감지.
    * - AUTH_SECRET: 세션 쿠키 암호화 키 (32바이트 base64).
+   * - AUTH_DISABLED: "1" 일 때만, 그리고 AUTH_PASSWORD 가 비었을 때만 인증을 끈다.
    */
   AUTH_PASSWORD: z.string().optional(),
   AUTH_SECRET: z.string().optional(),
+  AUTH_DISABLED: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

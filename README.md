@@ -106,8 +106,9 @@ npm run db:generate          # 스키마 변경 후 마이그레이션 생성
 | `DATABASE_PATH` | `./data/paperbento.db` | SQLite 파일 경로 |
 | `UPLOAD_DIR` | `./data/uploads` | PDF 원본·표지 저장 위치 |
 | `MAX_UPLOAD_MB` | `5120` | 업로드 1건당 최대 크기 (MB) |
-| `AUTH_PASSWORD` | (없음) | plaintext 또는 bcrypt 해시. 비우면 인증 끔 |
-| `AUTH_SECRET` | (없음) | 세션 쿠키 암호화 키 (32바이트 base64) |
+| `AUTH_PASSWORD` | (없음) | plaintext 또는 bcrypt 해시. **비우면 503 으로 막힘** |
+| `AUTH_SECRET` | (없음) | 세션 쿠키 암호화 키 (32바이트 base64). 비우면 503 |
+| `AUTH_DISABLED` | (없음) | `1` 일 때만 인증 없이 연다. `AUTH_PASSWORD` 가 있으면 무시 |
 | `MAILBENTO_URL` · `MEMOBENTO_URL` | (없음) | 헤더의 자매 앱 버튼 주소. 비우면 자동 유추 |
 | `AGENT_URL` · `AGENT_TOKEN` | (없음) | 에이전트 채팅 (아래 참고) |
 | `BASE_PATH` | (없음) | 하위 경로 배포. **빌드 시점**에만 (아래 참고) |

@@ -14,9 +14,89 @@
  */
 const basePath = (process.env.BASE_PATH ?? "").replace(/\/$/, "");
 
+/**
+ * 모든 응답에 붙이는 보안 머리글.
+ *
+ * HSTS 는 여기 없다 — Cloudflare 가장자리에서 붙인다. 앱이 직접 붙이면 http 로
+ * 도는 개발·LAN 배포에서도 같은 값이 나가 엉뚱하게 굳는다.
+ *
+ * - `X-Frame-Options: SAMEORIGIN` · `frame-ancestors 'self'` — DENY 가 아니다.
+ *   PDF 는 같은 오리진의 iframe(`pdf-frame.tsx`, 파일 라우트)으로 뜬다. DENY 면
+ *   pdf.js 가 못 뜰 때 물러나는 기본 보기가 빈 칸이 된다.
+ * - `Referrer-Policy: same-origin` — `no-referrer` 로 두면 Chrome 이 같은 오리진
+ *   POST 에도 `Origin: null` 을 보내 Origin 을 보는 검사가 전부 거절된다.
+ */
+const SECURITY_HEADERS = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "same-origin" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  // 카메라·마이크·위치를 쓰는 곳이 없다. 서재 안에 끼어든 무엇도 묻지 못하게 한다.
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+  },
+];
+
+/**
+ * 화면용 CSP. 이 앱이 실제로 쓰는 것만 연다 — 하나라도 빠지면 화면이 깨지므로
+ * 각 줄에 이유를 적어 둔다.
+ *
+ * - script `'unsafe-inline'`: App Router 가 흘려 보내는 `self.__next_f.push(…)` 와
+ *   `layout.tsx` 의 테마 부트 스크립트가 인라인이다. 막으면 화면이 하얗게 빈다.
+ *   nonce 로 가려면 모든 화면이 동적 렌더가 되어야 해서 택하지 않았다.
+ *   `'unsafe-eval'` 은 없다 — 운영 빌드는 eval 을 쓰지 않는다. pdf.js 는 eval 이
+ *   되는지 try/catch 로 떠보고 안 되면 느린 길로 그린다.
+ * - style `'unsafe-inline'`: React `style=` 과 pdf.js 뷰어가 쪽마다 쓰는 인라인 스타일.
+ * - jsdelivr: Pretendard 글꼴 CSS 와 그 CSS 가 부르는 글꼴 파일.
+ *   fonts.googleapis.com / fonts.gstatic.com: 본문·제목 글꼴 (`layout.tsx`).
+ * - img `data:` `blob:`: 브라우저가 PDF 첫 쪽을 그려 만드는 표지(캔버스 → blob).
+ * - worker `'self'` `blob:`: pdf.js 워커는 `/_next/static` 에서 뜨지만, 주소를 못
+ *   풀면 pdf.js 가 blob 으로 감싸 띄운다.
+ * - connect `'self'`: DOI·arXiv·Crossref 조회는 서버가 한다. 브라우저는 자기 API 와
+ *   `/pdfjs/` CMap 만 받는다.
+ * - frame `'self'`: 내장 뷰어로 물러날 때의 PDF iframe.
+ * - object `'none'`: `<object>`·`<embed>` 로 PDF 를 띄우는 곳이 없다 (iframe 만 쓴다).
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+  "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-src 'self' blob:",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // `X-Powered-By: Next.js` 는 판 번호를 찾는 쪽에 길만 알려 준다.
+  poweredByHeader: false,
+  async headers() {
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      /*
+       * CSP 는 파일 라우트(`/api/files/…`)를 **뺀다.** 그 라우트는 원본 PDF·표지에
+       * `sandbox` CSP 를 스스로 붙인다 (`lib/file-kind.ts` 의 `cspFor`). 여기서 하나
+       * 더 붙이면 브라우저는 두 정책을 **모두** 지키므로, 화면용 정책이 내장 PDF
+       * 뷰어를 막아 빈 iframe 이 된다.
+       *
+       * basePath 가 있으면 Next 가 source 앞에 접두어를 알아서 붙인다. 첫 화면
+       * (`/paper` 자체)은 아래 정규식에 안 걸릴 수 있어 따로 적는다.
+       */
+      { source: "/", headers: [{ key: "Content-Security-Policy", value: CSP }] },
+      {
+        source: "/((?!api/files/).*)",
+        headers: [{ key: "Content-Security-Policy", value: CSP }],
+      },
+    ];
+  },
   /*
    * 번들에 말아 넣지 않고 런타임에 require 로 두는 것.
    *

@@ -6,11 +6,21 @@
 
 import bcrypt from "bcryptjs";
 
+import { authMode } from "./auth-mode";
 import { db, schema } from "./db";
 import { env } from "./env";
 
+/**
+ * 로그인을 요구하는 배포인가.
+ *
+ * `AUTH_DISABLED=1` 로 **일부러 끈 경우에만** false 다. 설정이 빠진 경우
+ * (`misconfigured`)는 켜진 것으로 본다 — 미들웨어가 이미 503 으로 막지만, 혹시
+ * 그 앞을 지나온 요청이 있어도 "인증 꺼짐" 갈래(로그인 화면 건너뛰기, 쿠키 없이
+ * 통과)로 새지 않게 한다. 그 상태에서 `verifyPassword` 는 늘 false 라 로그인도
+ * 되지 않는다.
+ */
 export function isAuthEnabled(): boolean {
-  return !!env.AUTH_PASSWORD;
+  return authMode() !== "disabled";
 }
 
 /** Plaintext 와 bcrypt 해시 둘 다 자동 감지. timing-safe 비교. */

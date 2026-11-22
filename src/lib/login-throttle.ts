@@ -26,11 +26,34 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+/**
+ * 누가 두드리는지 가르는 열쇠.
+ *
+ * **X-Forwarded-For 의 첫 칸은 믿지 않는다.** 그 칸은 클라이언트가 직접 적어
+ * 보낼 수 있고, Cloudflare 도 받은 값을 지우지 않고 뒤에 덧붙이기만 한다. 첫
+ * 칸으로 가르면 시도마다 다른 주소를 적어 매번 새 통을 받을 수 있었다 — 횟수
+ * 제한이 통째로 무력해진다.
+ *
+ * 그래서 순서는 이렇다:
+ * 1. `cf-connecting-ip` — Cloudflare 가 가장자리에서 **덮어쓰는** 값이다. 포트가
+ *    loopback 에만 열린 뒤로는 cloudflared 말고는 이 앱에 닿지 못하므로 믿을 수 있다.
+ * 2. `x-real-ip` — 앞단 프록시가 하나 있는 배포.
+ * 3. X-Forwarded-For 의 **마지막** 칸 — 바로 앞 프록시가 붙인 값이라 클라이언트가
+ *    고를 수 없다.
+ * 4. 없으면 `unknown` 한 통에 묶는다. 주소를 못 가르는 상황에서는 전부 한 통에
+ *    넣는 편이 안전하다 (Docker 망 안의 MCP 처럼 머리글이 없는 호출이 여기 온다).
+ */
 function keyOf(req: Request): string {
-  // 프록시 뒤라면 X-Forwarded-For 가 진짜 주소를 들고 있다. 없으면 하나로 묶는다 —
-  // 주소를 못 가르는 상황에서 전부 한 통에 넣는 편이 안전하다.
-  const fwd = req.headers.get("x-forwarded-for");
-  return (fwd?.split(",")[0] ?? "").trim() || "unknown";
+  const h = req.headers;
+  const cf = h.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
+  const real = h.get("x-real-ip")?.trim();
+  if (real) return real;
+  const hops = (h.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return hops[hops.length - 1] ?? "unknown";
 }
 
 /** 지금 이 요청을 받아도 되는지. 막혔으면 남은 초. */

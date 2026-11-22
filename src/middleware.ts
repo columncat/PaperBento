@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { verifySession } from "@/lib/auth-crypto";
+import { MISCONFIGURED_MESSAGE, authMode } from "@/lib/auth-mode";
 
 /**
  * Edge-runtime 미들웨어 — DB 접근 X, bcrypt X.
@@ -57,11 +58,41 @@ function unauthorized() {
   );
 }
 
-export async function middleware(req: NextRequest) {
-  // 인증 비활성 → 통과
-  if (!process.env.AUTH_PASSWORD) return NextResponse.next();
+/**
+ * 인증 설정이 빠진 배포의 응답. API 는 JSON, 화면은 짧은 글.
+ *
+ * 리다이렉트가 아니라 503 인 까닭은 위 `isApi` 주석과 같다 — 받는 쪽이 무엇을
+ * 만났는지 알아야 한다. 그리고 이건 사용자가 고칠 일이 아니라 운영자가 고칠 일이다.
+ */
+function misconfigured(pathname: string) {
+  const headers = { "cache-control": "no-store" };
+  if (isApi(pathname)) {
+    return NextResponse.json(
+      { error: MISCONFIGURED_MESSAGE, code: "auth_misconfigured" },
+      { status: 503, headers },
+    );
+  }
+  return new NextResponse(MISCONFIGURED_MESSAGE, {
+    status: 503,
+    headers: { ...headers, "content-type": "text/plain; charset=utf-8" },
+  });
+}
 
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  /*
+   * 인증 설정이 빠졌으면 **막는다.** 예전에는 비밀번호가 비면 그냥 통과시켰다 —
+   * 설정 파일이 비밀번호 없이 다시 쓰이기만 해도 서재 전체가 조용히 열렸다.
+   * 일부러 끄려면 `AUTH_DISABLED=1` 을 적어야 한다 (`lib/auth-mode.ts`).
+   *
+   * 공개 경로(`/login`·`/api/login`)보다 **먼저** 본다. 로그인 화면만 열어 두면
+   * 사람은 "비밀번호가 틀렸다" 만 보고 원인을 못 찾는다.
+   */
+  const mode = authMode();
+  if (mode === "disabled") return NextResponse.next();
+  if (mode === "misconfigured") return misconfigured(pathname);
+
   if (isPublic(pathname)) return NextResponse.next();
 
   const sessionToken = req.cookies.get("mb_session")?.value;

@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from "@/lib/auth";
 import { encryptSession } from "@/lib/auth-crypto";
+import { MISCONFIGURED_MESSAGE, authMode } from "@/lib/auth-mode";
 import { checkLoginAllowed, noteLoginFailure, noteLoginSuccess } from "@/lib/login-throttle";
 
 export const dynamic = "force-dynamic";
@@ -48,8 +49,17 @@ const FAIL_DELAY_MS = 700;
 
 export async function POST(req: Request) {
   if (!isAuthEnabled()) {
-    // 인증이 꺼진 배포에서는 쿠키가 필요 없다. 클라이언트가 그대로 진행하면 된다.
+    // `AUTH_DISABLED=1` 로 일부러 끈 배포에서만 온다. 쿠키가 필요 없으니
+    // 클라이언트가 그대로 진행하면 된다.
     return NextResponse.json({ ok: true, authDisabled: true });
+  }
+  if (authMode() === "misconfigured") {
+    // 미들웨어가 먼저 막지만 같은 답을 여기서도 준다. 비밀번호나 키가 빠진 채로
+    // "틀렸습니다" 를 돌려주면 MCP 쪽은 원인을 영영 못 찾는다.
+    return NextResponse.json(
+      { error: MISCONFIGURED_MESSAGE, code: "auth_misconfigured" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
   }
 
   // 횟수로 막는다. 지연만으로는 동시 요청이 겹쳐 사라진다.

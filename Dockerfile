@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ── 베이스 (glibc) — better-sqlite3 prebuild 사용 가능 ──
-FROM node:20-slim AS base
+# node 22 다. 20 은 2026-04 에 수명이 끝났고, 이 기계에서 `npm install` 하는 node 도
+# 22 라 호스트와 이미지의 네이티브 ABI 가 같아진다 (그래도 .dockerignore 가
+# node_modules 를 막는 것은 그대로 필요하다 — 의존성은 아래 deps 단계가 새로 깐다).
+# bookworm 을 박아 둔다. `22-slim` 은 Debian 판이 바뀌면 소리 없이 따라가서
+# glibc 와 빌드 도구가 한꺼번에 달라진다. VoiceBento·BentoAgent 와 같은 바탕이다.
+FROM node:22-bookworm-slim AS base
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 
