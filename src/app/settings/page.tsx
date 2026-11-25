@@ -19,9 +19,6 @@ import { countPapers } from "@/lib/types";
  */
 export const dynamic = "force-dynamic";
 
-/** 휴지통 보관 기간. 스키마 주석과 같은 값이다. */
-const RETENTION_DAYS = 30;
-
 export default async function SettingsPage() {
   const authEnabled = isAuthEnabled();
   const groups = listGroups();
@@ -92,12 +89,6 @@ export default async function SettingsPage() {
           <Stat label="논문" value={String(papers)} />
           <Stat label="요약" value={String(summaries)} />
         </dl>
-
-        <p className="mt-3 text-[11px] break-keep text-(--color-fg-4)">
-          서가는 <b>두 단까지</b>입니다 — 서가 안에 칸을 둘 수 있지만 그 칸은
-          다시 칸을 갖지 못합니다. 시스템 서가(<b>Inbox</b>)는 이름 변경·삭제가
-          잠겨 있고, 안의 논문은 자유롭게 옮길 수 있습니다.
-        </p>
       </section>
 
       {/* 표시 설정 */}
@@ -123,21 +114,15 @@ export default async function SettingsPage() {
         서지정보 내보내기 — 바로 위 "백업" 과 다른 것이다.
 
         둘 다 파일 하나가 떨어지는 단추라 붙여 두면 반드시 헷갈린다. 그래서
-        같은 카드에 합치지 않고, 서로가 무엇이 **아닌지**를 두 줄로 적었다.
-        백업은 우리 DB 모양 그대로라 되살리기 말고는 쓸 데가 없고(BibTeX 키도
+        같은 카드에 합치지 않았다. 백업은 우리 DB 모양 그대로라 되살리기 말고는 쓸 데가 없고(BibTeX 키도
         저자 성/이름 구분도 없다), 이쪽은 position·groupId 같은 우리 사정이
         빠진 대신 남의 프로그램이 읽는다.
 
         `?paper=` 도 `?group=` 도 주지 않으면 라우트가 서재 전체로 읽는다.
       */}
       <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-        <header className="mb-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-base font-medium text-(--color-fg)">서지정보 내보내기</div>
-            <div className="text-xs break-keep text-(--color-fg-4)">
-              서재에 든 논문 {papers}편을 논문 관리자가 읽는 형식으로 내보냅니다.
-            </div>
-          </div>
+        <header className="flex items-center justify-between gap-3">
+          <div className="min-w-0 text-base font-medium text-(--color-fg)">서지정보 내보내기</div>
           <ExportMenu
             target={{}}
             label="서재 전체"
@@ -145,57 +130,27 @@ export default async function SettingsPage() {
             className="bg-(--color-bg-2)"
           />
         </header>
-
-        <p className="text-[11px] break-keep text-(--color-fg-4)">
-          위의 <b>백업</b>과 다른 것입니다. 백업은 <b>이 앱으로 되살리기</b> 위한
-          것이고(서가·요약·메모까지 우리 모양 그대로), 이쪽은{" "}
-          <b>Zotero·EndNote·LaTeX 에 넣을 인용 자료</b>입니다. 원본 서지정보가
-          없는 논문도 빠지지 않습니다 — 적어 둔 칸으로 최소한을 만들어 함께
-          내보냅니다.
-        </p>
       </section>
 
       {/* 기록 */}
       <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-        <h2 className="mb-1 text-lg font-medium text-(--color-fg)">기록</h2>
-        <p className="mb-4 text-sm text-(--color-fg-4)">
-          지운 것과, 에이전트가 고친 것.
-        </p>
+        <h2 className="mb-4 text-lg font-medium text-(--color-fg)">기록</h2>
         <div className="flex flex-col gap-2">
-          <SubPageLink
-            href="/settings/trash"
-            title="휴지통"
-            desc={`지운 서가·논문을 ${RETENTION_DAYS}일간 보관합니다`}
-          />
-          <SubPageLink
-            href="/settings/agent-log"
-            title="에이전트 기록"
-            desc="MCP 로 연결된 에이전트가 무엇을 고쳤는지"
-          />
+          <SubPageLink href="/settings/trash" title="휴지통" />
+          <SubPageLink href="/settings/agent-log" title="에이전트 기록" />
         </div>
       </section>
     </main>
   );
 }
 
-function SubPageLink({
-  href,
-  title,
-  desc,
-}: {
-  href: string;
-  title: string;
-  desc: string;
-}) {
+function SubPageLink({ href, title }: { href: string; title: string }) {
   return (
     <Link
       href={href}
       className="flex items-center justify-between gap-3 rounded-lg bg-(--color-bg-2) px-4 py-3 ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface-hi)"
     >
-      <span className="min-w-0">
-        <span className="block text-sm text-(--color-fg)">{title}</span>
-        <span className="block text-[12px] break-keep text-(--color-fg-4)">{desc}</span>
-      </span>
+      <span className="min-w-0 text-sm text-(--color-fg)">{title}</span>
       <ChevronRight className="h-4 w-4 shrink-0 text-(--color-fg-4)" />
     </Link>
   );

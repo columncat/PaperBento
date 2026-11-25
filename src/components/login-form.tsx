@@ -95,10 +95,6 @@ export function LoginForm({ to }: { to: string }) {
         {pending && <Loader2 className="h-4 w-4 animate-spin" />}
         {pending ? "확인 중…" : "로그인"}
       </button>
-
-      <p className="text-center text-[10.5px] text-(--color-fg-4)">
-        모든 로그인 시도는 기록됩니다 (실패 포함).
-      </p>
     </form>
   );
 }

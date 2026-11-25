@@ -197,7 +197,6 @@ export function PresetsPanel() {
       <Card
         title="요약 지시문"
         icon={<Sparkles className="h-4 w-4 text-(--color-fg-3)" />}
-        desc="논문 화면의 “에이전트에게 맡기기” 에서 고르는 목록입니다. 이름은 목록에 보이는 한 줄이고, 지시문이 실제로 에이전트에게 갑니다."
       >
         <ul className="flex flex-col gap-1.5">
           {presets.map((p, i) => {
@@ -262,11 +261,6 @@ export function PresetsPanel() {
                       aria-label="지시문 전문"
                       className="scrollbar-thin w-full resize-y rounded-md bg-(--color-surface) p-2.5 text-[11.5px] leading-relaxed text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none focus:ring-(--color-accent)/60"
                     />
-                    {p.prompt.trim().length === 0 && (
-                      <p className="mt-1 text-[10.5px] break-keep text-(--color-fg-4)">
-                        지시문이 비어 있으면 요약 상자에서 <b>실행</b>이 눌리지 않습니다.
-                      </p>
-                    )}
                   </div>
                 ) : (
                   <p className="truncate px-2.5 pb-2 pl-8 text-[11px] text-(--color-fg-4)">
@@ -277,13 +271,6 @@ export function PresetsPanel() {
             );
           })}
         </ul>
-
-        {lonely && (
-          <p className="mt-2 text-[11px] break-keep text-(--color-fg-4)">
-            <b>하나는 남겨야 합니다.</b> 전부 지우면 요약 상자에 고를 것이 없어 매번
-            지시문을 손으로 적어야 합니다. 마음에 안 드는 것은 지우지 말고 고쳐 쓰세요.
-          </p>
-        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -323,10 +310,7 @@ export function PresetsPanel() {
       </Card>
 
       {/* ── 서지정보 제안 지시문 ───────────────────────── */}
-      <Card
-        title="서지정보 지시문"
-        desc="등록 시트에서 “에이전트가 서지정보를 채우기” 를 켰을 때 쓰는 글입니다. 요약과 달리 하나뿐입니다 — 찾아올 칸이 정해져 있어 매번 다르게 시킬 일이 없습니다."
-      >
+      <Card title="서지정보 지시문">
         <textarea
           value={biblio}
           onChange={(e) => setBiblio(e.target.value)}
@@ -336,12 +320,6 @@ export function PresetsPanel() {
           className="scrollbar-thin w-full resize-y rounded-md bg-(--color-bg-2) p-3 text-[11.5px] leading-relaxed text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none focus:ring-(--color-accent)/60"
         />
 
-        <p className="mt-2 text-[11px] break-keep text-(--color-fg-4)">
-          여기 적는 것은 <b>무엇을 찾아 달라고 할지</b>뿐입니다. 답의 형식과 울타리
-          규칙(도구 없이, 아는 칸만 받아 적기)은 코드에 박혀 있어 이 칸으로 바뀌지
-          않습니다. 받아 온 값은 언제나 <b>제안</b>으로 앉고, 논문이 바뀌는 것은
-          “적용” 을 누른 그 한 번뿐입니다.
-        </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -370,21 +348,18 @@ export function PresetsPanel() {
 function Card({
   title,
   icon,
-  desc,
   children,
 }: {
   title: string;
   icon?: React.ReactNode;
-  desc?: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-      <div className="mb-1 flex items-center gap-2 text-base font-medium text-(--color-fg)">
+      <div className="mb-4 flex items-center gap-2 text-base font-medium text-(--color-fg)">
         {icon}
         {title}
       </div>
-      {desc && <p className="mb-4 text-xs break-keep text-(--color-fg-4)">{desc}</p>}
       {children}
     </section>
   );

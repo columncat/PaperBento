@@ -571,18 +571,18 @@ export function useLibrarySearch(groups: GroupDTO[]) {
      */
     if (fromUrl.droppedTags > 0 && chips === fromUrl.chips) {
       out.push(
-        `주소에 실린 태그가 너무 많아 앞의 ${MAX_URL_TAGS}개만 켰습니다 — ${fromUrl.droppedTags}개는 빠져 있어 목록이 주소를 보낸 쪽과 다를 수 있습니다`,
+        `주소에 실린 태그가 너무 많아 앞의 ${MAX_URL_TAGS}개만 켰습니다 (${fromUrl.droppedTags}개 빠짐)`,
       );
     }
     const res = answer && answer.q === deepQuery ? answer.res : null;
     if (!res) return out;
     if (res.tooManyWords) {
       out.push(
-        "낱말이 너무 많아 서버가 찾지 않았습니다 — 지금 보이는 것은 목록에 실린 칸만으로 거른 결과입니다. 낱말을 줄이면 다시 찾습니다",
+        "낱말이 너무 많아 서버가 찾지 않았습니다 — 목록에 실린 칸만으로 거른 결과입니다",
       );
     }
     if (res.truncated) {
-      out.push("맞는 논문이 너무 많아 서버가 앞쪽만 보냈습니다 — 낱말을 더하거나 칩으로 좁혀 보세요");
+      out.push("맞는 논문이 너무 많아 서버가 앞쪽만 보냈습니다");
     }
     /*
      * 자르는 자리가 낱말 사이로 바뀌면서 이 말도 바뀌어야 했다. 예전에는
@@ -593,8 +593,7 @@ export function useLibrarySearch(groups: GroupDTO[]) {
      */
     if (res.queryTruncated) {
       out.push(
-        "질의가 길어 앞쪽 낱말로만 찾았습니다 — 200자를 넘는 낱말은 통째로 빠집니다." +
-          " 빠진 낱말은 목록에 실린 칸으로만 걸렀습니다(요약 · 메모 · PDF 본문은 못 뒤졌습니다)",
+        "질의가 길어 앞쪽 낱말로만 찾았습니다 — 빠진 낱말로는 요약 · 메모 · PDF 본문을 못 뒤졌습니다",
       );
     }
     return out;
@@ -755,7 +754,6 @@ export function useLibrarySearch(groups: GroupDTO[]) {
     nChips,
     tagOptions,
     active,
-    hasQuery: words.length > 0,
     results,
     shown,
     total: results.length,
@@ -766,15 +764,6 @@ export function useLibrarySearch(groups: GroupDTO[]) {
     clearAll,
     deepBusy,
     deepError,
-    /**
-     * 지금 화면이 **깊은 자리까지 본 답**으로 그려지고 있는가.
-     *
-     * 빈 결과에 무슨 안내를 붙일지가 여기에 걸린다. 거짓이면 본 것은 목록에
-     * 실린 여덟 칸뿐인데(기다리는 중 · 서버가 죽음 · 낱말이 너무 많음),
-     * 그때 "열한 자리를 다 찾아봤다" 고 적으면 바로 위의 오류 줄이나 알림 줄과
-     * 맞선다 — 같은 화면에서 두 문장이 서로를 부정하면 사람은 둘 다 안 믿는다.
-     */
-    deepServed: served,
     notes,
   };
 }
@@ -1009,7 +998,6 @@ function ChipPanel({ search }: { search: LibrarySearch }) {
     return [...on, ...off.slice(0, Math.max(0, TAG_PREVIEW - on.length))];
   }, [allTags, tagOptions, chips.tags]);
 
-  const hasGone = tags.some((t) => t.count === 0);
 
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-(--color-surface) p-2.5 ring-1 ring-(--color-border-soft)">
@@ -1050,10 +1038,8 @@ function ChipPanel({ search }: { search: LibrarySearch }) {
 
       <ChipRow label="태그">
         {tagOptions.length === 0 ? (
-          // 왜 비었는지는 한 줄 남긴다. 빈 자리는 고장으로 보인다.
-          <span className="text-[11px] break-keep text-(--color-fg-4)">
-            서재에 태그가 아직 없습니다 — 서지정보 편집에서 붙일 수 있습니다
-          </span>
+          // 빈 자리는 고장으로 보인다 — 비었다는 것만은 적는다.
+          <span className="text-[11px] break-keep text-(--color-fg-4)">태그 없음</span>
         ) : (
           <>
             {tags.map(({ tag, key, count }) => {
@@ -1085,12 +1071,6 @@ function ChipPanel({ search }: { search: LibrarySearch }) {
         )}
       </ChipRow>
 
-      {/* 0 이라는 숫자만으로는 왜 남아 있는지 알 수 없다. 한 줄로 적어 둔다. */}
-      {hasGone && (
-        <p className="pl-16 text-[10.5px] break-keep text-(--color-fg-4)">
-          0편인 칩은 지금 서재에 없는 태그입니다 — 눌러서 끌 수 있습니다
-        </p>
-      )}
     </div>
   );
 }
@@ -1195,14 +1175,6 @@ export function SearchResults({
             {deepError}
           </span>
         )}
-
-        {/*
-          `hidden sm:inline` 이었다. 좁은 화면에서 통째로 사라지니, 키보드만
-          쓰는 사람이 폭을 줄인 창에서는 ↑↓ 로 옮길 수 있다는 것을 알 길이
-          없었다. 이제 넓으면 오른쪽 끝에 붙고 좁으면 제 줄로 내려간다
-          (머리말이 `flex-wrap` 이다).
-        */}
-        <span className="break-keep sm:ml-auto">↑↓ 옮기기 · Enter 열기 · Esc 지우기</span>
       </header>
 
       {notes.length > 0 && (
@@ -1244,7 +1216,7 @@ export function SearchResults({
 
       {search.truncated && (
         <p className="border-t border-(--color-border-soft) px-4 py-2 text-[11px] break-keep text-(--color-fg-4)">
-          앞의 {MAX_ROWS}편만 보입니다 — 낱말을 더하거나 칩을 켜서 좁혀 보세요
+          앞의 {MAX_ROWS}편만 보입니다
         </p>
       )}
     </section>
@@ -1373,8 +1345,7 @@ function ResultRow({
 /**
  * 아무것도 안 걸렸을 때.
  *
- * "없습니다" 만 두지 않는다 — 무엇 때문에 비었는지, 무엇을 해 볼 수 있는지
- * 까지 적어야 사람이 다음 걸음을 옮긴다. 아직 뒤(깊은 찾기)가 돌고 있으면
+ * 아직 뒤(깊은 찾기)가 돌고 있으면
  * 아예 "없다" 고 말하지 않는다. 그때 없다고 했다가 곧 결과가 생기면, 그
  * 한 번으로 이 상자를 못 믿게 된다.
  */
@@ -1390,39 +1361,10 @@ function EmptyResult({ search }: { search: LibrarySearch }) {
     );
   }
 
-  const hints = [
-    search.hasQuery
-      ? "낱말을 줄이거나 짧게 잘라 보세요 — 낱말은 하나도 빠짐없이 들어 있어야 맞습니다"
-      : null,
-    search.nChips > 0 ? "켜 둔 칩을 꺼 보세요 — 칩은 질의와 함께 걸립니다" : null,
-    /*
-     * 어디를 찾아봤는지는 **실제로 찾아본 만큼만** 적는다.
-     *
-     * 열한 자리를 다 본 것은 서버가 이 질의에 답했을 때뿐이다. 서버가 죽었거나
-     * 낱말이 너무 많아 아예 안 찾았을 때는 목록에 실린 여덟 칸이 전부인데, 그때도
-     * "열한 자리를 이미 찾아봤습니다" 라고 적으면 바로 위에 뜬 오류 줄("요약 ·
-     * 메모 · PDF 본문은 빠져 있습니다")이나 알림 줄("서버가 찾지 않았습니다")과
-     * 정면으로 맞선다. 한 화면에서 두 문장이 서로를 부정하면 사람은 어느 쪽도
-     * 안 믿게 되고, "없다" 는 결론까지 함께 못 믿게 된다.
-     */
-    search.hasQuery
-      ? search.deepServed
-        ? "제목 · 저자 · 학회 · 연도 · DOI · arXiv · 태그 · 초록 · 요약 · 메모 · PDF 앞부분, 열한 자리를 이미 찾아봤습니다 (낱말 하나가 어느 자리에 있든 맞습니다)"
-        : "지금 찾아본 것은 목록에 실린 여덟 칸(제목 · 저자 · 학회 · 연도 · DOI · arXiv · 태그 · 초록)뿐입니다 — 요약 · 메모 · PDF 앞부분은 아직 못 봤습니다"
-      : null,
-  ].filter(Boolean) as string[];
-
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center text-(--color-fg-4)">
       <SearchX className="h-6 w-6" aria-hidden />
       <p className="text-xs break-keep text-(--color-fg-3)">맞는 논문이 없습니다</p>
-      <ul className="flex flex-col gap-0.5">
-        {hints.map((h) => (
-          <li key={h} className="text-[11px] break-keep">
-            {h}
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

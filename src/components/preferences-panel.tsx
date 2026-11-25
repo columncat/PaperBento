@@ -146,10 +146,6 @@ export function PreferencesPanel() {
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[11px] break-keep text-(--color-fg-4)">
-          MemoBento · MailBento 와 같은 팔레트입니다. 세 앱을 나란히 띄워 두고
-          쓰는 자리라 색이 어긋나면 그것만으로 다른 앱처럼 보입니다.
-        </p>
       </div>
 
       {/* 열 개수 */}
@@ -198,11 +194,6 @@ export function PreferencesPanel() {
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[11px] break-keep text-(--color-fg-4)">
-          지운 논문은 30일간 휴지통에 남으므로 <b>묻지 않음</b>도 안전합니다.
-          다만 논문은 PDF 를 딸고 있어 되살리기가 더 중요합니다 — 그래서 서가
-          삭제는 이 설정과 무관하게 늘 확인합니다.
-        </p>
       </div>
     </section>
   );

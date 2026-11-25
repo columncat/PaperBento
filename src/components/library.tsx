@@ -616,21 +616,6 @@ export function Library({
         </DndContext>
       )}
 
-      <footer className="mt-2 text-center text-xs break-keep text-(--color-fg-4)">
-        {search.active ? (
-          <>
-            <b>↑↓</b> 로 옮기고 <b>Enter</b> 로 엽니다 · <b>Esc</b> 로 지웁니다 ·
-            찾는 동안에는 순서를 바꿀 수 없습니다
-          </>
-        ) : (
-          <>
-            PDF 를 서가에 <b>끌어다 놓으면</b> 올린 뒤 등록 시트가 열립니다 · 카드
-            머리말을 끌면 서가 순서, 표지를 끌면 논문 순서가 바뀝니다 · <b>/</b> 로
-            찾기
-          </>
-        )}
-      </footer>
-
       <PaperSheet
         target={sheet}
         groups={groups}

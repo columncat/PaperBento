@@ -400,17 +400,9 @@ export function PaperDetail({
 
             `hasCsl` 로 막지 않는다 — 원본이 없어도 라우트가 우리 칸으로
             최소한을 만들어 준다. 인용 목록에서 한 편이 소리 없이 빠지는 것이
-            가장 나쁘다. 그래서 여기서는 "원본이 있느냐" 를 알려만 준다.
+            가장 나쁘다.
           */}
-          <ExportMenu
-            target={{ paperId: paper.id }}
-            label="서지정보"
-            hint={
-              paper.hasCsl
-                ? "받아 온 원본 서지정보가 있어 저자·권·쪽까지 온전히 나갑니다."
-                : "원본 서지정보가 없어 적어 둔 칸으로 만듭니다. 서지정보 찾기를 한 번 돌리면 더 온전해집니다."
-            }
-          />
+          <ExportMenu target={{ paperId: paper.id }} label="서지정보" />
 
           {/*
             글 쪽 접기.
@@ -497,10 +489,7 @@ export function PaperDetail({
               */
               <p className="flex shrink-0 items-start gap-1.5 rounded-lg bg-(--color-surface) px-3 py-2 text-[11px] leading-relaxed break-keep text-(--color-fg-3) ring-1 ring-(--color-border-soft)">
                 <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-(--color-danger)" />
-                <span>
-                  원문 뷰어를 띄우지 못해 브라우저 기본 보기로 넘어갔습니다. 읽는 데는
-                  지장이 없지만 이 상태에서는 쪽 위에 메모를 달 수 없습니다.
-                </span>
+                <span>원문 뷰어를 띄우지 못해 기본 보기로 넘어갔습니다 — 메모를 달 수 없습니다</span>
               </p>
             )}
 
@@ -667,7 +656,7 @@ export function PaperDetail({
                   가리키는 법" 이라 한자리에 모인다. 초록 뒤에 두면 초록이 긴
                   논문에서 화면 밖으로 밀려 나가 있는 줄도 모르게 된다.
                 */}
-                <CiteCopy paperId={paper.id} hasCsl={paper.hasCsl} />
+                <CiteCopy paperId={paper.id} />
 
                 {tags.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
@@ -706,10 +695,6 @@ export function PaperDetail({
                   className="scrollbar-thin min-h-[220px] flex-1 resize-y rounded-lg bg-(--color-bg-2) p-3 font-mono text-[12.5px] leading-relaxed text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none placeholder:text-(--color-fg-4) focus:ring-(--color-accent)/60"
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
-                  <span className="mr-auto text-[10.5px] text-(--color-fg-4)">
-                    Ctrl+Enter 로 저장
-                    {summary?.source === "agent" && " · 고치면 사람이 쓴 글이 됩니다"}
-                  </span>
                   <button
                     type="button"
                     onClick={() => {

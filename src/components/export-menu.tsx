@@ -40,11 +40,11 @@ export interface ExportTarget {
 
 const FORMAT_META: Record<
   ExportFormat,
-  { label: string; hint: string; Icon: React.ComponentType<{ className?: string }> }
+  { label: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
-  bibtex: { label: "BibTeX", hint: ".bib · LaTeX · Overleaf", Icon: FileText },
-  ris: { label: "RIS", hint: ".ris · EndNote · RefWorks", Icon: BookMarked },
-  csl: { label: "CSL-JSON", hint: ".json · Zotero · Pandoc", Icon: Braces },
+  bibtex: { label: "BibTeX", Icon: FileText },
+  ris: { label: "RIS", Icon: BookMarked },
+  csl: { label: "CSL-JSON", Icon: Braces },
 };
 
 /** 형식 셋. 남의 메뉴 안에도 우리 팝오버 안에도 그대로 들어간다. */
@@ -69,10 +69,7 @@ export function ExportLinks({
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-(--color-surface-hi)"
           >
             <meta.Icon className="h-3.5 w-3.5 shrink-0 text-(--color-fg-4)" />
-            <span className="min-w-0">
-              <span className="block text-xs text-(--color-fg-2)">{meta.label}</span>
-              <span className="block truncate text-[10px] text-(--color-fg-4)">{meta.hint}</span>
-            </span>
+            <span className="min-w-0 text-xs text-(--color-fg-2)">{meta.label}</span>
           </a>
         );
       })}
@@ -84,12 +81,10 @@ export function ExportLinks({
 export function ExportSection({
   target,
   title,
-  hint,
   onPick,
 }: {
   target: ExportTarget;
   title: string;
-  hint?: string;
   onPick?: () => void;
 }) {
   return (
@@ -98,9 +93,6 @@ export function ExportSection({
         {title}
       </p>
       <ExportLinks target={target} onPick={onPick} />
-      {hint && (
-        <p className="px-3 pt-0.5 pb-1 text-[10px] break-keep text-(--color-fg-4)">{hint}</p>
-      )}
     </div>
   );
 }
@@ -116,15 +108,12 @@ export function ExportMenu({
   target,
   label,
   title,
-  hint,
   className,
 }: {
   target: ExportTarget;
   /** 단추에 적힐 글. PDF "내려받기" 와 헷갈리지 않는 이름을 준다. */
   label: string;
   title?: string;
-  /** 팝오버 아래 한 줄. 원본 서지정보 유무 같은 것. */
-  hint?: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -167,11 +156,6 @@ export function ExportMenu({
           className="absolute top-9 right-0 z-50 w-56 overflow-hidden rounded-xl bg-(--color-surface) py-1 shadow-xl ring-1 ring-(--color-border)"
         >
           <ExportLinks target={target} onPick={() => setOpen(false)} />
-          {hint && (
-            <p className="mt-1 border-t border-(--color-border-soft) px-3 pt-1.5 pb-1 text-[10px] break-keep text-(--color-fg-4)">
-              {hint}
-            </p>
-          )}
         </div>
       )}
     </div>

@@ -13,7 +13,7 @@ import { cn, formatDateTime } from "@/lib/utils";
  * 서가가 함께 지워졌다면 서가를 먼저 되살려야 하는데, 단추만 흐리게 해 두면
  * 사람은 그 순서를 알 길이 없다.
  */
-export function TrashPanel({ retentionDays }: { retentionDays: number }) {
+export function TrashPanel() {
   const [entries, setEntries] = useState<TrashEntryDTO[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export function TrashPanel({ retentionDays }: { retentionDays: number }) {
 
   return (
     <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-      <header className="mb-1 flex items-center justify-between gap-2">
+      <header className="mb-4 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-base font-medium text-(--color-fg)">
           <Trash2 className="h-4 w-4 text-(--color-fg-3)" />
           휴지통
@@ -82,11 +82,6 @@ export function TrashPanel({ retentionDays }: { retentionDays: number }) {
           </button>
         )}
       </header>
-      <p className="mb-4 text-xs break-keep text-(--color-fg-4)">
-        지운 서가·논문은 <b>{retentionDays}일</b> 동안 여기 보관되고 그때까지 되살릴 수
-        있습니다. PDF 원본도 함께 남아 있다가 만료되면 같이 지워집니다 — 되살리면 같은
-        파일이 그대로 다시 붙습니다.
-      </p>
 
       {entries === null ? (
         <div className="flex items-center justify-center gap-2 py-8 text-xs text-(--color-fg-4)">

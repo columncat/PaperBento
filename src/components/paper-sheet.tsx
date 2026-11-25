@@ -754,7 +754,7 @@ export function PaperSheet({
         role="dialog"
         aria-modal="true"
         aria-label={registering ? "논문 등록" : "서지정보 편집"}
-        className="scrollbar-thin relative flex h-full w-[min(520px,100vw)] flex-col overflow-y-auto bg-(--color-surface) shadow-2xl ring-1 ring-(--color-border)"
+        className="scrollbar-thin relative flex h-full w-[min(860px,100vw)] flex-col overflow-y-auto bg-(--color-surface) shadow-2xl ring-1 ring-(--color-border)"
         onKeyDown={(e) => {
           // 긴 초록을 적다가 Enter 로 저장되면 안 되므로 Ctrl+Enter 로만 확정한다.
           if ((e.ctrlKey || e.metaKey) && e.key === "Enter") void submit();
@@ -808,12 +808,6 @@ export function PaperSheet({
                   )}
                   에이전트에게 채우게 하기
                 </button>
-                <p className="mt-1.5 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                  먼저 바깥에서 찾아오고, 거기서 못 채운 칸만 PDF 앞부분을 읽어
-                  짐작합니다. <b className="text-(--color-fg-3)">적어 둔 값도 덮습니다.</b>{" "}
-                  논문이 바뀌는 것은 아래 <b className="text-(--color-fg-3)">저장</b>을
-                  누른 뒤입니다.
-                </p>
               </div>
               {/*
                 되돌리기는 **채운 것이 있을 때만** 뜬다. 돌아갈 자리가 없는데
@@ -839,9 +833,7 @@ export function PaperSheet({
               <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-3)">
                 {filled.length}칸을 채웠습니다
                 {filledByLookup > 0 && ` · 등록기관 ${filledByLookup}`}
-                {filledByGuess > 0 && ` · 추측 ${filledByGuess}`} — 이름표 옆 딱지가
-                칸마다 출처를 말합니다. 되돌리기는 몇 번을 눌렀든 <b>채우기 전의 값</b>으로
-                한 번에 돌아갑니다.
+                {filledByGuess > 0 && ` · 추측 ${filledByGuess}`}
               </p>
             )}
 
@@ -862,8 +854,7 @@ export function PaperSheet({
             {stored && !agentBusy && filled.length === 0 && (
               <div className="flex items-start gap-2">
                 <p className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                  앞서 에이전트가 내놓은 추측이 남아 있습니다. 이것을 쓰면 다시 부르지
-                  않습니다.
+                  앞서 받아 둔 추측이 있습니다
                 </p>
                 <button
                   type="button"
@@ -881,14 +872,13 @@ export function PaperSheet({
                 <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
                 {agentBusy === "lookup"
                   ? "먼저 바깥에서 서지정보를 찾는 중"
-                  : "PDF 앞부분을 읽는 중 (1분 넘게 걸릴 수 있습니다)"}
+                  : "PDF 앞부분을 읽는 중"}
               </p>
             )}
 
             {pendingPick && !agentBusy && (
               <p className="text-[10.5px] leading-snug break-keep text-(--color-warn)">
-                후보가 여럿이라 멈춰 있습니다. 아래 DOI·arXiv 칸 밑에서 맞는 것을
-                고르면 그 값이 칸에 앉고, 그것을 단서로 나머지를 이어서 채웁니다.
+                후보가 여럿이라 멈춰 있습니다
               </p>
             )}
 
@@ -907,13 +897,6 @@ export function PaperSheet({
               <p className="flex items-start gap-1.5 text-[10.5px] leading-snug break-keep text-(--color-warn)">
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                 <span className="min-w-0">찾아온 값과 논문이 어긋납니다 — {guess.mismatch}</span>
-              </p>
-            )}
-
-            {filledByGuess > 0 && !agentBusy && (
-              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                추측으로 채운 칸에는 받아 온 원본(CSL)이 없습니다. 저장하기 전에
-                한 번 훑어보세요.
               </p>
             )}
           </div>
@@ -950,11 +933,7 @@ export function PaperSheet({
             />
           </Field>
 
-          <Field
-            label="저자"
-            hint="사람이 읽는 한 줄로 적습니다. 쉼표로 나누면 보기 좋습니다"
-            origin={marks.authors ?? null}
-          >
+          <Field label="저자" origin={marks.authors ?? null}>
             <input
               value={fields.authors ?? ""}
               onChange={(e) => set("authors", e.target.value || null)}
@@ -1013,24 +992,19 @@ export function PaperSheet({
             누른 결과가 바로 위 칸들로 흘러 들어가는 것이 눈에 보여야 한다.
           */}
           <div className="flex flex-col gap-2.5 rounded-lg bg-(--color-bg-2) px-3 py-3 ring-1 ring-(--color-border-soft)">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void runLookup()}
-                disabled={lookupBusy || !canLookup}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-surface-hi) px-3 py-1.5 text-xs font-medium text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface) disabled:opacity-40"
-              >
-                {lookupBusy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Search className="h-3.5 w-3.5" />
-                )}
-                찾아오기
-              </button>
-              <p className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                DOI → arXiv → 제목 차례로 바깥에서 찾습니다.
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => void runLookup()}
+              disabled={lookupBusy || !canLookup}
+              className="flex shrink-0 items-center gap-1.5 self-start rounded-full bg-(--color-surface-hi) px-3 py-1.5 text-xs font-medium text-(--color-fg-2) ring-1 ring-(--color-border-soft) transition hover:bg-(--color-surface) disabled:opacity-40"
+            >
+              {lookupBusy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              찾아오기
+            </button>
 
             {/*
               후보가 여럿일 때는 **우리가 고르지 않는다.**
@@ -1040,10 +1014,7 @@ export function PaperSheet({
             {report && report.candidates.length > 1 && (
               <div className="flex flex-col gap-1.5">
                 <div className="text-[10.5px] break-keep text-(--color-fg-4)">
-                  후보 {report.candidates.length}개 — 맞는 것을 고르세요
-                  {/* 에이전트가 이 선택을 기다리고 있다는 것을 그 자리에서 말한다.
-                      아래 상자에만 적어 두면 왜 멈춰 있는지 보이지 않는다. */}
-                  {pendingPick && " (고르면 그 값이 칸에 앉고 나머지를 이어서 채웁니다)"}
+                  후보 {report.candidates.length}개
                 </div>
                 {report.candidates.map((c, i) => (
                   <button
@@ -1069,15 +1040,6 @@ export function PaperSheet({
                   </button>
                 ))}
               </div>
-            )}
-
-            {/* 되돌린 뒤에는 "들어갔습니다" 가 거짓말이 된다. 칸에 남아 있을 때만 말한다. */}
-            {picked && filledByLookup > 0 && (
-              <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-                찾아온 값이 위 칸에 들어갔습니다 — 적어 두었던 값은 덮였습니다. 받아 온{" "}
-                <b>원본</b>도 함께 실려 BibTeX 내보내기가 온전해집니다. 되돌리려면 맨 위의
-                되돌리기를 누르세요.
-              </p>
             )}
 
             {/*
@@ -1123,9 +1085,6 @@ export function PaperSheet({
                   {d.title}
                 </Link>
               ))}
-              <p className="pl-5 text-[10.5px] text-(--color-fg-4)">
-                그래도 등록할 수 있습니다 — 같은 논문을 여러 서가에 둘 수 있습니다.
-              </p>
             </div>
           )}
 
@@ -1138,7 +1097,7 @@ export function PaperSheet({
             />
           </Field>
 
-          <Field label="태그" hint="쉼표로 나눕니다">
+          <Field label="태그">
             <input
               value={fields.tags ?? ""}
               onChange={(e) => set("tags", e.target.value || null)}
@@ -1173,7 +1132,6 @@ export function PaperSheet({
         </div>
 
         <footer className="sticky bottom-0 mt-auto flex items-center justify-end gap-2 border-t border-(--color-border-soft) bg-(--color-surface) px-5 py-4">
-          <span className="mr-auto text-[10.5px] text-(--color-fg-4)">Ctrl+Enter 로 저장</span>
           <button
             type="button"
             onClick={onClose}
@@ -1204,18 +1162,14 @@ const INPUT =
 /**
  * 이름표와 칸 한 벌.
  *
- * 이름표와 칸만 `<label>` 로 묶고 바깥은 `<div>` 다. 힌트까지 `<label>` 안에
- * 넣으면 그것을 누를 때도 칸에 포커스가 뛴다.
  */
 function Field({
   label,
-  hint,
   required,
   origin,
   children,
 }: {
   label: string;
-  hint?: string;
   required?: boolean;
   /**
    * 이 칸에 지금 앉아 있는 값이 어디서 왔는가. 사람이 적은 값이면 null.
@@ -1228,17 +1182,14 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <label className="flex flex-col gap-1.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-wider text-(--color-fg-4) uppercase">
-          {label}
-          {required && <span className="text-(--color-accent)">*</span>}
-          {origin && <OriginBadge origin={origin} />}
-        </span>
-        {children}
-      </label>
-      {hint && <span className="text-[10.5px] break-keep text-(--color-fg-4)">{hint}</span>}
-    </div>
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-wider text-(--color-fg-4) uppercase">
+        {label}
+        {required && <span className="text-(--color-accent)">*</span>}
+        {origin && <OriginBadge origin={origin} />}
+      </span>
+      {children}
+    </label>
   );
 }
 

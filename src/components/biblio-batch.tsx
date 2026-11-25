@@ -299,14 +299,7 @@ export function BiblioBatchPanel({
         <div className="flex flex-col gap-3 px-4 py-3.5">
           <p className="text-[11.5px] leading-relaxed break-keep text-(--color-fg-3)">
             {state.total}편 모두 <b className="text-(--color-fg-2)">에이전트가 서지정보를 채우게</b>{" "}
-            할까요? 먼저 바깥(doi.org · arXiv · Crossref)에서 찾고, 거기서 못 채운 칸만
-            PDF 앞부분을 읽어 짐작합니다.
-          </p>
-          {/* 무엇이 바뀌고 무엇이 안 바뀌는지 누르기 전에 말한다. */}
-          <p className="text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-            도는 동안 서재는 그대로입니다. 다 돌면 한 편씩 시트가 열리고, 채운 값은
-            거기서 확인하고 <b className="text-(--color-fg-3)">저장</b>을 눌러야 논문에
-            들어갑니다. 한 편에 1분이 넘을 수 있습니다.
+            할까요?
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -383,13 +376,8 @@ export function BiblioBatchPanel({
             </ul>
           )}
 
-          <footer className="flex items-center justify-between gap-2 border-t border-(--color-border-soft) px-4 py-2.5">
-            <span className="min-w-0 flex-1 text-[10.5px] leading-snug break-keep text-(--color-fg-4)">
-              {state.phase === "running"
-                ? "하나가 실패해도 나머지는 계속 돕니다"
-                : "이제 한 편씩 시트가 열립니다 — 확인하고 저장하세요"}
-            </span>
-            {state.phase === "running" && (
+          {state.phase === "running" && (
+            <footer className="flex justify-end border-t border-(--color-border-soft) px-4 py-2.5">
               <button
                 type="button"
                 onClick={onStop}
@@ -397,8 +385,8 @@ export function BiblioBatchPanel({
               >
                 멈추기
               </button>
-            )}
-          </footer>
+            </footer>
+          )}
         </>
       )}
     </div>

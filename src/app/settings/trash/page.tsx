@@ -1,8 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-import { RETENTION_DAYS } from "@/lib/trash";
-
 import { TrashPanel } from "./trash-panel";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +22,7 @@ export default function TrashPage() {
         설정으로
       </Link>
       <h1 className="text-2xl text-(--color-fg)">휴지통</h1>
-      <TrashPanel retentionDays={RETENTION_DAYS} />
+      <TrashPanel />
     </main>
   );
 }

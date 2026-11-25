@@ -32,12 +32,9 @@ export default async function LoginPage({
         <div className="grid h-12 w-12 place-items-center rounded-xl bg-(--color-surface) ring-1 ring-(--color-border-soft)">
           <LibraryIcon className="h-6 w-6 text-(--color-accent)" />
         </div>
-        <div>
-          <h1 className="text-2xl leading-tight" style={{ fontFamily: "var(--font-serif)" }}>
-            PaperBento
-          </h1>
-          <p className="text-xs text-(--color-fg-4)">서재 접근에 비밀번호 필요</p>
-        </div>
+        <h1 className="text-2xl leading-tight" style={{ fontFamily: "var(--font-serif)" }}>
+          PaperBento
+        </h1>
       </div>
 
       <section className="w-full rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">

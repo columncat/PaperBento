@@ -22,16 +22,14 @@ interface Entry {
  */
 export function AgentLogPanel() {
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
     try {
       const r = await apiFetch("/api/agent-log");
-      const j = (await r.json()) as { entries?: Entry[]; retentionDays?: number };
+      const j = (await r.json()) as { entries?: Entry[] };
       setEntries(j.entries ?? []);
-      if (j.retentionDays) setDays(j.retentionDays);
     } finally {
       setLoading(false);
     }
@@ -60,11 +58,8 @@ export function AgentLogPanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm break-keep text-(--color-fg-3)">
-          에이전트(MCP)가 고친 것만 남습니다. {days}일이 지나면 사라집니다.
-        </p>
-        {entries.length > 0 && (
+      {entries.length > 0 && (
+        <div className="flex justify-end">
           <button
             type="button"
             onClick={() => void clear()}
@@ -73,8 +68,8 @@ export function AgentLogPanel() {
             <Trash2 className="h-3.5 w-3.5" />
             기록 비우기
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {entries.length === 0 ? (
         <div className="rounded-lg border border-dashed border-(--color-border) py-10 text-center text-sm break-keep text-(--color-fg-4)">

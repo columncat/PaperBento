@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { useState } from "react";
 
 import { apiFetch } from "@/lib/api-path";
@@ -49,13 +49,8 @@ export function SettingsExport() {
 
   return (
     <section className="rounded-[var(--radius-card)] bg-(--color-surface) p-6 ring-1 ring-(--color-border-soft)">
-      <header className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-base font-medium text-(--color-fg)">백업</div>
-          <div className="text-xs break-keep text-(--color-fg-4)">
-            서가·논문·요약·메모와 표시 설정을 한 파일로 내보냅니다.
-          </div>
-        </div>
+      <header className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-base font-medium text-(--color-fg)">백업</div>
         <button
           type="button"
           onClick={() => void onExport()}
@@ -66,16 +61,6 @@ export function SettingsExport() {
           내보내기
         </button>
       </header>
-
-      <p className="flex items-start gap-1.5 text-[11px] break-keep text-(--color-fg-4)">
-        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-(--color-warn)" />
-        <span>
-          PDF 의 <b>바이트는 이 JSON 에 들어 있지 않습니다</b> — 원본은{" "}
-          <code className="font-mono">data/uploads</code> 볼륨에 있습니다. 서버를
-          옮길 때는 JSON 과 함께 그 디렉터리도 복사하세요. 논문은 파일이 곧
-          본체라 여기서 어긋나면 되살려도 빈 껍데기가 됩니다.
-        </span>
-      </p>
 
       {status && (
         <p

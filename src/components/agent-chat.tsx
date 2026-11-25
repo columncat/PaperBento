@@ -344,9 +344,6 @@ export function AgentChat({ renderMemoRef }: Props = {}) {
                 <span className="truncate text-sm font-medium text-(--color-fg)">
                   에이전트
                 </span>
-                <span className="shrink-0 text-[11px] break-keep text-(--color-fg-4)">
-                  메일함과 메모함 권한이 있습니다
-                </span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
@@ -376,13 +373,6 @@ export function AgentChat({ renderMemoRef }: Props = {}) {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   지난 대화를 불러오는 중…
                 </div>
-              )}
-              {!loadingHistory && turns.length === 0 && (
-                <p className="px-1 py-12 text-center text-sm break-keep text-(--color-fg-4)">
-                  메모함과 메일함을 읽고 고칠 수 있습니다.
-                  <br />
-                  &ldquo;오늘 안 읽은 메일 정리해줘&rdquo; 처럼 말해 보세요.
-                </p>
               )}
               {turns.map((t, i) => (
                 <div

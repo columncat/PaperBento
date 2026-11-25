@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import { ArrowLeft, CheckCircle2, Clock, Lock, XCircle, Zap } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Lock, XCircle, Zap } from "lucide-react";
 import Link from "next/link";
 
 import { isAuthEnabled } from "@/lib/auth";
@@ -18,7 +18,7 @@ export default async function HistoryPage() {
     return (
       <main className="mx-auto max-w-[640px] px-6 py-16 text-center">
         <p className="text-sm text-(--color-fg-3)">
-          인증이 꺼져 있습니다 (AUTH_DISABLED=1). 기록은 인증을 켰을 때만 남습니다.
+          인증이 꺼져 있습니다 (AUTH_DISABLED=1).
         </p>
         <Link
           href="/"
@@ -51,14 +51,6 @@ export default async function HistoryPage() {
           로그인 기록
         </h1>
       </header>
-
-      <div className="flex items-start gap-2 rounded-lg bg-(--color-surface) px-4 py-3 text-xs text-(--color-fg-3) ring-1 ring-(--color-border-soft)">
-        <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-(--color-fg-4)" />
-        <span>
-          모든 로그인 시도(수동/자동/성공/실패)가 기록되며 <strong>삭제할 수 없습니다</strong>.
-          최근 500건 표시.
-        </span>
-      </div>
 
       <section className="overflow-hidden rounded-[var(--radius-card)] bg-(--color-surface) ring-1 ring-(--color-border-soft)">
         {logs.length === 0 ? (
@@ -121,11 +113,6 @@ export default async function HistoryPage() {
           </div>
         )}
       </section>
-
-      <footer className="text-center text-[10.5px] text-(--color-fg-4)">
-        <Clock className="mx-auto mb-1 h-3 w-3" />
-        가장 최근 500건만 표시. 더 오래된 기록은 DB 의 login_log 테이블에 그대로 보존.
-      </footer>
     </main>
   );
 }

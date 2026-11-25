@@ -677,9 +677,6 @@ export function GroupCard({
                 <ExportSection
                   target={{ groupId: group.id }}
                   title="서지정보 내보내기"
-                  hint={
-                    group.children.length > 0 ? "안의 칸에 든 논문까지 함께" : undefined
-                  }
                   onPick={close}
                 />
                 <div className="mt-1 border-t border-(--color-border-soft) pt-1">
@@ -740,9 +737,7 @@ export function GroupCard({
             {group.papers.length === 0 && group.children.length === 0 && (
               <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center text-(--color-fg-4)">
                 <LibraryIcon className="h-6 w-6" />
-                <span className="text-[11.5px] break-keep">
-                  PDF 를 끌어다 놓으면 여기에 꽂힙니다
-                </span>
+                <span className="text-[11.5px] break-keep">비어 있습니다</span>
               </div>
             )}
 
@@ -804,7 +799,6 @@ export function AddGroupCard({ onCreate }: { onCreate: (name: string) => void })
         }}
         className="w-full rounded-lg bg-(--color-bg-2) px-3 py-2 text-sm text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none focus:ring-(--color-accent)/60"
       />
-      <p className="text-[11px] text-(--color-fg-4)">Enter 로 만들고 Esc 로 취소</p>
     </div>
   );
 }

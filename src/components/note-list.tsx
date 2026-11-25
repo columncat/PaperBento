@@ -54,7 +54,7 @@ export function NoteList({
       >
         <StickyNote className="h-6 w-6" />
         <p className="text-xs break-keep">
-          아직 메모가 없습니다 — 원문에서 글자를 골라 보세요
+          아직 메모가 없습니다
         </p>
       </div>
     );

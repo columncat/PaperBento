@@ -348,10 +348,7 @@ export function SummaryRun({
                 rows={6}
                 className="scrollbar-thin w-full resize-y rounded-md bg-(--color-surface) p-2.5 text-[11.5px] leading-relaxed text-(--color-fg) ring-1 ring-(--color-border-soft) outline-none focus:ring-(--color-accent)/60"
               />
-              <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="text-[10.5px] text-(--color-fg-4)">
-                  이 번만 바뀝니다. 프리셋은 그대로입니다
-                </span>
+              <div className="mt-1 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setEdited(null)}
@@ -377,8 +374,7 @@ export function SummaryRun({
             className="mt-0.5 h-3.5 w-3.5 shrink-0"
           />
           <span className="min-w-0 break-keep text-(--color-fg-3)">
-            <b className="text-(--color-fg-2)">직접 쓰신 요약이 이미 있습니다.</b> 새로 만들면
-            지금 글은 사라지고 되돌릴 수 없습니다. 덮어써도 괜찮습니다.
+            <b className="text-(--color-fg-2)">직접 쓰신 요약이 있습니다.</b> 덮어써도 괜찮습니다.
           </span>
         </label>
       )}
@@ -391,11 +387,11 @@ export function SummaryRun({
       )}
 
       <div className="mt-3 flex items-center justify-end gap-2">
-        <span className="mr-auto text-[10.5px] text-(--color-fg-4)">
-          {running
-            ? `읽고 쓰는 중… ${elapsed}초`
-            : "PDF 앞부분의 글자만 넘어갑니다 (원본은 넘기지 않습니다)"}
-        </span>
+        {running && (
+          <span className="mr-auto text-[10.5px] text-(--color-fg-4)">
+            읽고 쓰는 중… {elapsed}초
+          </span>
+        )}
         <button
           type="button"
           onClick={() => void run()}

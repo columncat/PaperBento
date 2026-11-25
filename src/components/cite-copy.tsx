@@ -272,7 +272,7 @@ function CitationText({ html }: { html: string }) {
 //   상자
 // ─────────────────────────────────────────────────────────────
 
-export function CiteCopy({ paperId, hasCsl }: { paperId: string; hasCsl: boolean }) {
+export function CiteCopy({ paperId }: { paperId: string }) {
   const [style, setStyle] = useState<CiteStyleKey>(DEFAULT_CITE_STYLE);
   const [item, setItem] = useState<CSLItem | null>(null);
   const [cite, setCite] = useState<Citation | null>(null);
@@ -464,31 +464,14 @@ export function CiteCopy({ paperId, hasCsl }: { paperId: string; hasCsl: boolean
             )}
           </div>
 
-          {(cite.missing.length > 0 || !hasCsl) && (
-            <div className="mt-2.5 flex flex-col gap-1 border-t border-(--color-border-soft) pt-2">
-              {cite.missing.length > 0 && (
-                <p className="flex items-start gap-1.5 text-[11px] break-keep text-(--color-fg-3)">
-                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-(--color-warn)" />
-                  <span>
-                    <b>{cite.missing.join(" · ")}</b>
-                    {subjectJosa(cite.missing[cite.missing.length - 1])} 비어 있습니다. 인용
-                    형식은 그 자리를 비운 채로도 한 줄을 만들어 내므로, 이대로 붙이면
-                    틀린 인용이 됩니다 — 위의 <b>고치기</b> 로 채우거나 서지정보를 다시
-                    찾아오세요.
-                  </span>
-                </p>
-              )}
-              {!hasCsl && (
-                <p className="flex items-start gap-1.5 text-[11px] break-keep text-(--color-fg-4)">
-                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                  <span>
-                    원본 서지정보(CSL)가 없어 화면에 적힌 칸만으로 만들었습니다. 저자
-                    이름이 성만 남고 권·호·쪽이 빠집니다 — <b>고치기</b> 에서 DOI 나
-                    arXiv 번호로 한 번 찾아오면 온전해집니다.
-                  </span>
-                </p>
-              )}
-            </div>
+          {cite.missing.length > 0 && (
+            <p className="mt-2.5 flex items-start gap-1.5 border-t border-(--color-border-soft) pt-2 text-[11px] break-keep text-(--color-fg-3)">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-(--color-warn)" />
+              <span>
+                <b>{cite.missing.join(" · ")}</b>
+                {subjectJosa(cite.missing[cite.missing.length - 1])} 비어 있습니다.
+              </span>
+            </p>
           )}
         </>
       )}

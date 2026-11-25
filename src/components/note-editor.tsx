@@ -187,7 +187,6 @@ function EditorBox({
       </div>
 
       <div className="flex items-center justify-end gap-2">
-        <span className="mr-auto text-[10.5px] text-(--color-fg-4)">Ctrl+Enter 로 저장</span>
         <button
           type="button"
           onClick={onCancel}

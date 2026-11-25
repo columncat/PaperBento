@@ -381,16 +381,6 @@ export function PaperChat({
         inBig ? "min-h-0 flex-1 px-5 py-4" : cn(INLINE_LIST_MAX, "px-5 pb-3"),
       )}
     >
-      {turns.length === 0 && !busy && (
-        <p
-          className={cn(
-            "text-center break-keep text-(--color-fg-4)",
-            inBig ? "px-1 py-12 text-sm" : "px-1 py-4 text-[12px]",
-          )}
-        >
-          이 논문을 읽고 답합니다. 다른 논문도 찾아보고, 메모함에 메모도 만들 수 있습니다.
-        </p>
-      )}
       {turns.map((t, i) => (
         <div
           key={i}
